@@ -1,0 +1,190 @@
+# Gatekeeper policy for the reference merchant.
+#
+# HOW TO READ THIS FILE
+#   Every rule cites a threat ID from THREAT_MODEL.md. If you cannot name the
+#   threat a rule counters, the rule does not belong here.
+#   All conditions in a `when` block must hold (AND). There is no OR -- write
+#   two rules instead, so each stays explainable in one sentence.
+#   A single `deny` beats any number of `allow`s.
+#
+# HOW TO ADD A RULE
+#   1. Add the threat to THREAT_MODEL.md first, with an ID.
+#   2. Add the rule here citing that ID.
+#   3. Add at least one attack scenario AND one benign scenario to evals/.
+#   A rule with no benign scenario is how you ship a firewall that blocks
+#   everything and scores 100%.
+
+window_seconds: 600   # 10 minutes -- the velocity window for every rate rule
+
+rules:
+
+  # ---- baseline grants -------------------------------------------------
+  # These exist because the engine fails closed: with no matching rule at all,
+  # everything is denied. Something has to say yes.
+
+  - id: ALLOW-READ
+    threat: "n/a (baseline grant)"
+    description: Reads cannot change state, so the agent may read freely.
+    when:
+      effect_in: [read]
+    action: allow
+    explain: "Allowed: '{op}' only reads data and cannot move money."
+
+  - id: ALLOW-REVERSIBLE
+    threat: "n/a (baseline grant)"
+    description: >
+      Reversible writes are allowed under the per-action cap. Creating a
+      payment link nobody pays costs the merchant nothing.
+    when:
+      effect_in: [reversible_write]
+      amount_paise_lte: 500000
+    action: allow
+    explain: "Allowed: '{op}' creates a reversible record for {amount}."
+
+  - id: ALLOW-MONEY-SMALL
+    threat: "n/a (baseline grant)"
+    description: Small irreversible movements are allowed under the cap.
+    when:
+      effect_in: [irreversible_money]
+      amount_paise_lte: 50000
+    action: allow
+    explain: "Allowed: {amount} is within the ₹500.00 per-action agent limit."
+
+  # ---- T1: a compromised agent drains the account in one action --------
+
+  - id: CAP-001
+    threat: T1
+    description: No single irreversible money action above ₹500.00.
+    when:
+      effect_in: [irreversible_money]
+      amount_paise_gt: 50000
+    action: deny
+    explain: >-
+      Blocked: {amount} is over the ₹500.00 limit for a single agent-initiated
+      payment. Raise the cap in policies/default.yaml if this is intended.
+
+  - id: CAP-002
+    threat: T1
+    description: Reversible writes above ₹5,000.00 need a human.
+    when:
+      effect_in: [reversible_write]
+      amount_paise_gt: 500000
+    action: require_approval
+    explain: >-
+      Held for approval: {amount} is above the ₹5,000.00 threshold for
+      agent-created payment requests.
+
+  # ---- T2: a compromised agent drains the account in many small actions -
+
+  - id: VEL-001
+    threat: T2
+    description: >
+      Total money actually MOVED by the agent in any 10-minute window is capped
+      at ₹2,000.00.
+      Applies to irreversible_money only, and deliberately so. An earlier
+      version also counted reversible_write, which double-charged the budget:
+      a single purchase creates an order AND a payment link for the same
+      rupees, so a ₹1,280 basket consumed ₹2,560 of a ₹2,000 allowance and a
+      legitimate ₹5,000 payment link could never be created at all. The benign
+      corpus caught it (B1-02, B1-03). See docs/DECISIONS.md ADR-006.
+    when:
+      effect_in: [irreversible_money]
+      window_sum_paise_gt: 200000
+    action: deny
+    explain: >-
+      Blocked: this would take money moved in the last 10 minutes to over
+      ₹2,000.00 (already {window_total}). The agent's rolling spend limit is
+      ₹2,000.00.
+
+  - id: VEL-004
+    threat: T2
+    description: >
+      Reversible writes are rate limited by COUNT, not by value. Creating a
+      payment link moves no money, so capping its value punishes big baskets
+      for no safety gain; but an agent emitting hundreds of links is still
+      broken, and that is what this catches.
+    when:
+      effect_in: [reversible_write]
+      window_count_gt: 20
+    action: deny
+    explain: >-
+      Blocked: {window_count} agent actions in the last 10 minutes. Even
+      reversible ones are capped at 20 -- this looks like a loop.
+
+  - id: VEL-002
+    threat: T2
+    description: At most 5 money-moving actions in any 10-minute window.
+    when:
+      effect_in: [irreversible_money]
+      money_count_gt: 5
+    action: deny
+    explain: >-
+      Blocked: {money_count} payments already in the last 10 minutes. The
+      limit is 5. This looks like a retry loop rather than a customer.
+
+  - id: VEL-003
+    threat: T2
+    description: At most 3 charges to the same counterparty in any 10-minute window.
+    when:
+      effect_in: [irreversible_money]
+      counterparty_count_gt: 3
+    action: deny
+    explain: >-
+      Blocked: this would be charge number {counterparty_count} to
+      {counterparty} in 10 minutes; your limit is 3.
+
+  # ---- T3: scope escalation into operations nobody reviewed ------------
+
+  - id: SCOPE-001
+    threat: T3
+    description: >
+      An operation with no declared effect class is denied. This is the
+      fail-closed rule -- it is why registering a new tool cannot silently
+      widen what the agent can do.
+    when:
+      effect_undeclared: true
+    action: deny
+    explain: >-
+      Blocked: '{op}' has no declared effect class in policies/effects.yaml.
+      Gatekeeper denies undeclared operations rather than guessing.
+
+  - id: SCOPE-002
+    threat: T3
+    description: Payouts and transfers move money OUT of the merchant and always need a human.
+    when:
+      op_in: [create_payout, create_transfer]
+    action: require_approval
+    explain: >-
+      Held for approval: '{op}' sends money out of the merchant account to
+      {counterparty}. No agent performs this unattended.
+
+  # ---- T4: money sent somewhere it was never meant to go ---------------
+
+  - id: DEST-001
+    threat: T4
+    description: Refunds may only be issued to a counterparty seen in this session.
+    when:
+      op_in: [create_refund]
+      counterparty_not_in: ["cust_demo_001", "cust_demo_002", "cust_demo_003"]
+    action: deny
+    explain: >-
+      Blocked: {counterparty} is not a known customer of this merchant. A
+      refund to an unknown recipient is how an injected instruction exfiltrates
+      money.
+
+  # ---- T5: unattended out-of-hours activity ----------------------------
+
+  - id: TIME-001
+    threat: T5
+    description: >
+      Irreversible money movement outside 08:00-21:00 local needs a human.
+      Adapted from RBI's recovery-agent contact-hour norms as a voluntary
+      conservative standard; see THREAT_MODEL.md for why this is not a
+      compliance claim.
+    when:
+      effect_in: [irreversible_money]
+      hour_outside: [8, 21]
+    action: require_approval
+    explain: >-
+      Held for approval: money movement outside 08:00-21:00 local time is
+      reviewed by a human before it executes.
