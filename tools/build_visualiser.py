@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+"""Regenerate the data block inside visualiser.html from a real run.
+
+The page is not a mockup. Every verdict, explanation, rule id, amount and
+audit hash it displays comes from actually executing demo.py's agent plan
+through the proxy, here, now. Run this and the page updates:
+
+    make visualiser
+
+This exists because of what went wrong everywhere else in this project: a
+hand-written figure in a document drifts away from the code and nobody
+notices for a week. The README's demo transcript was wrong twice. A page
+whose numbers are typed in by hand would be wrong a third time, and it is
+the artifact most likely to be looked at and least likely to be re-checked.
+
+The generator writes ONLY the contents of <script id="trace">. Everything
+else in visualiser.html is hand-authored and left alone.
+"""
+from __future__ import annotations
+
+import json
+import re
+import sys
+import tempfile
+from datetime import datetime
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+import yaml  # noqa: E402
+
+from demo import AGENT_PLAN, NOW, SECRET  # noqa: E402
+from gatekeeper.backends import MockBackend  # noqa: E402
+from gatekeeper.console import use_utf8_stdout  # noqa: E402
+from gatekeeper.models import ActionRequest  # noqa: E402
+from gatekeeper.proxy import Gatekeeper  # noqa: E402
+from gatekeeper.tokens import issue  # noqa: E402
+
+MOVES_MONEY = ("create_refund", "create_payout", "capture_payment")
+
+# Which lifecycle stage actually decided. Derived from the rule ids the proxy
+# records rather than from a new field, so the page cannot claim a stage the
+# audit log does not support.
+STAGE_BY_RULE = {
+    "AUTH-001": 1,      # capability token failed to verify
+    "SCOPE-000": 2,     # operation outside the grant
+    "GRANT-001": 5,     # the grant's own ceilings
+    "INTERNAL-001": 0,  # fail-closed on an internal error
+}
+
+STAGES = [
+    {"n": 1, "name": "Verify token",
+     "what": "Is this agent who it says it is?",
+     "detail": "HMAC over the capability, compared in constant time, with a short "
+               "expiry. Not a JWT: one issuer, one verifier, one algorithm, and no "
+               "algorithm-confusion footguns to inherit."},
+    {"n": 2, "name": "Check scope",
+     "what": "Was it granted this operation at all?",
+     "detail": "An exact-match test against the operation list inside the token. "
+               "Cheap, and it keeps “you were never given this” a different "
+               "sentence from “you were given this, but not right now”."},
+    {"n": 3, "name": "Classify effect",
+     "what": "How dangerous is this operation?",
+     "detail": "read / reversible_write / irreversible_money, looked up in "
+               "policies/effects.yaml. An operation that is not listed has no "
+               "effect class, and the next stage denies it. Registering a new tool "
+               "therefore cannot quietly widen what an agent can do."},
+    {"n": 4, "name": "Evaluate policy",
+     "what": "Caps, velocity, destination, hours.",
+     "detail": "14 rules of YAML over a fixed vocabulary of typed conditions. Every "
+               "rule cites a threat id. A single deny beats any number of allows, "
+               "and a request no rule covers is denied rather than assumed safe."},
+    {"n": 5, "name": "Apply the grant’s own ceilings",
+     "what": "A capability may only ever narrow policy further.",
+     "detail": "The token carries its own per-action and per-window limits. This "
+               "runs after policy, not before: the default grant mirrors the "
+               "default policy numbers, so checking it first would shadow every "
+               "rule and every denial would read “your capability caps this” "
+               "instead of naming the rule and the threat behind it."},
+    {"n": 6, "name": "Idempotency",
+     "what": "Have we already done exactly this?",
+     "detail": "A key derived from the request content, checked BEFORE execution, "
+               "under a lock. After execution, a retry storm has already charged "
+               "the customer twenty times and the cache only stops the "
+               "twenty-first."},
+    {"n": 7, "name": "Execute",
+     "what": "Only now does anything move.",
+     "detail": "The proxy holds the payment credential. The agent never has one, "
+               "which is the entire architecture in one sentence: a proxy the "
+               "agent can bypass enforces nothing."},
+    {"n": 8, "name": "Append to the audit chain",
+     "what": "Always — including on a denial.",
+     "detail": "Each record stores the hash of the one before it. A log that "
+               "records only what it allowed cannot tell you what it stopped, "
+               "which is the half a merchant actually wants to read."},
+]
+
+
+def _stage_of(res, audit_rules: list[str]) -> int:
+    """Which stage produced this verdict.
+
+    `audit_rules` comes from the audit row, not from `decision.hits`. The
+    proxy's own rejections at stages 1, 2 and 5 never reach the policy
+    engine, so they produce no hits at all -- reading only `hits` labelled
+    every one of them "stage 4, policy", which is a stage the audit log does
+    not support. The whole point of this page is that it cannot say things
+    the log does not.
+    """
+    for r in audit_rules:
+        if r in STAGE_BY_RULE:
+            return STAGE_BY_RULE[r]
+    if res.replayed:
+        return 6
+    if res.decision.verdict.value != "allow":
+        # SCOPE-001 is a policy rule, but what it reacts to is stage 3 finding
+        # no classification at all. Attribute it where the cause is.
+        return 3 if "SCOPE-001" in audit_rules else 4
+    return 7 if res.executed else 8
+
+
+def run() -> dict:
+    use_utf8_stdout()
+
+    # ---- run 1: nothing in the way -------------------------------------
+    ungoverned, moved = [], 0
+    backend = MockBackend()
+    for op, args in AGENT_PLAN:
+        amt = int(args.get("amount", 0))
+        try:
+            backend.call(op, args)
+            delta = amt if op in MOVES_MONEY else 0
+            moved += delta
+            ungoverned.append({"op": op, "amount_paise": amt, "executed": True,
+                               "moved_paise": delta, "running_paise": moved,
+                               "error": None})
+        except Exception as e:                                    # noqa: BLE001
+            ungoverned.append({"op": op, "amount_paise": amt, "executed": False,
+                               "moved_paise": 0, "running_paise": moved,
+                               "error": str(e)})
+
+    # ---- run 2: the same agent, behind the proxy ------------------------
+    db = tempfile.mktemp(suffix=".db")
+    gk = Gatekeeper(backend=MockBackend(), db_path=db, signing_secret=SECRET)
+    token = issue("buyer-1", sorted({op for op, _ in AGENT_PLAN} - {"transfer_all_funds"}),
+                  secret=SECRET, ttl_seconds=86_400, now=NOW)
+
+    results, moved2 = [], 0
+    for i, (op, args) in enumerate(AGENT_PLAN):
+        res = gk.handle(token, ActionRequest(op=op, args=args), now=NOW + i)
+        amt = int(args.get("amount", 0))
+        delta = amt if (res.executed and op in MOVES_MONEY) else 0
+        moved2 += delta
+        results.append((op, args, res, amt, delta, moved2))
+
+    rows = list(gk.audit.rows())
+    by_seq = {r["seq"]: [x for x in (r["rule_ids"] or "").split(",") if x]
+              for r in rows}
+
+    _raw = yaml.safe_load((ROOT / "policies/default.yaml").read_text(encoding="utf-8"))
+    RULE_THREAT = {r["id"]: str(r.get("threat", "")) for r in _raw["rules"]}
+    RULE_THREAT["SCOPE-000"] = "T3"    # the proxy's own scope check
+    RULE_THREAT["GRANT-001"] = "T3"    # the grant's own ceilings
+    RULE_THREAT["AUTH-001"] = "T3"
+
+    governed = []
+    for op, args, res, amt, delta, running in results:
+        audit_rules = by_seq.get(res.audit_seq, [])
+        governed.append({
+            "op": op,
+            "amount_paise": amt,
+            "counterparty": ActionRequest(op=op, args=args).counterparty,
+            "args": {k: v for k, v in args.items() if k != "notes"},
+            "verdict": res.decision.verdict.value,
+            "executed": res.executed,
+            "replayed": res.replayed,
+            "stage": _stage_of(res, audit_rules),
+            "rules": audit_rules,
+            # From the rules map, not from decision.hits: a rejection at stage
+            # 1, 2 or 5 never reaches the policy engine and so carries no hits,
+            # which left the proxy's own controls looking threat-less.
+            "threats": sorted({RULE_THREAT[r] for r in audit_rules
+                               if RULE_THREAT.get(r, "").startswith("T")}),
+            "explanation": " ".join(res.decision.explanation.split()),
+            "moved_paise": delta,
+            "running_paise": running,
+            "audit_seq": res.audit_seq,
+        })
+
+    audit = [{"seq": r["seq"], "op": r["op"], "verdict": r["verdict"],
+              "effect": r["effect"], "amount_paise": r["amount_paise"],
+              "rule_ids": r["rule_ids"], "executed": bool(r["executed"]),
+              "hash": r["hash"][:12], "prev_hash": r["prev_hash"][:12],
+              "explanation": " ".join((r["explanation"] or "").split())}
+             for r in rows]
+    chain = gk.audit.verify()
+    held = gk.audit.pending_approvals()
+    gk.close()
+
+    # ---- the rules, so the page can explain whichever one fired ---------
+    raw = yaml.safe_load((ROOT / "policies/default.yaml").read_text(encoding="utf-8"))
+    rules = {r["id"]: {"threat": str(r.get("threat", "")),
+                       "description": " ".join(str(r.get("description", "")).split()),
+                       "action": r["action"]}
+             for r in raw["rules"]}
+    rules["SCOPE-000"] = {
+        "threat": "T3", "action": "deny",
+        "description": "Not a policy rule. The proxy's own scope check at stage 2: "
+                       "the capability token never listed this operation."}
+    rules["GRANT-001"] = {
+        "threat": "T3", "action": "deny",
+        "description": "Not a policy rule. The grant's own ceilings at stage 5, "
+                       "which may only ever be narrower than merchant policy."}
+
+    # ---- the measured numbers, straight out of the eval -----------------
+    ev = json.loads((ROOT / "eval_results.json").read_text(encoding="utf-8"))
+
+    return {
+        "generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "stages": STAGES,
+        "rules": rules,
+        "ungoverned": ungoverned,
+        "governed": governed,
+        "audit": audit,
+        "chain_ok": chain.ok,
+        "chain_len": chain.checked,
+        "held_count": len(held),
+        "totals": {"ungoverned_paise": moved, "governed_paise": moved2},
+        "eval": {
+            "block_rate": ev["attack"]["block_rate"],
+            "blocked": ev["attack"]["blocked"],
+            "blocking_calls": ev["attack"]["blocking_calls"],
+            "attack_total": ev["attack"]["total"],
+            "false_block_rate": ev["benign"]["false_block_rate"],
+            "benign_total": ev["benign"]["total"],
+            "holdout": ev.get("holdout"),
+            "p50": ev["latency_ms"]["p50"],
+            "p95": ev["latency_ms"]["p95"],
+            "baseline": ev["baseline_deny_all"],
+        },
+    }
+
+
+def main() -> int:
+    page = ROOT / "visualiser.html"
+    if not page.exists():
+        print(f"FATAL: {page} does not exist. This script fills in its data "
+              f"block; it does not create the page.", file=sys.stderr)
+        return 2
+
+    data = json.dumps(run(), indent=1, ensure_ascii=False)
+    html = page.read_text(encoding="utf-8")
+    new, n = re.subn(
+        r'(<script id="trace" type="application/json">).*?(</script>)',
+        lambda m: m.group(1) + "\n" + data + "\n" + m.group(2),
+        html, count=1, flags=re.S)
+    if n != 1:
+        print('FATAL: could not find <script id="trace" type="application/json">',
+              file=sys.stderr)
+        return 2
+    page.write_text(new, encoding="utf-8")
+    print(f"visualiser.html updated — {len(data):,} bytes of trace from a live run")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

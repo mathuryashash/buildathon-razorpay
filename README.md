@@ -26,6 +26,16 @@ merchant can read.
 
 ---
 
+## See it happen
+
+`visualiser.html` — open it in a browser, no server needed. A step-through of
+the run below: the agent's twelve actions on the left, the eight-stage gate in
+the middle with the stage that decided flagged, and the money meters and audit
+chain assembling on the right. Every verdict, rule id, amount and hash on that
+page comes from executing this agent plan through the real proxy; `make
+visualiser` re-bakes it from a live run, so it cannot drift the way this
+README's own demo transcript did twice.
+
 ## The demo in one screen
 
 ```
@@ -520,6 +530,7 @@ has no business holding a production credential.
 | `policies/effects.yaml` | Operation → effect class. Absent means denied. |
 | `policies/default.yaml` | 14 rules, each citing a threat. |
 | `evals/` | 52 scenarios / 145 calls across two corpora + the harness. |
+| `visualiser.html` | The run above, step-through-able in a browser. Data baked in from a live run by `tools/build_visualiser.py`. |
 | `docs/DECISIONS.md` | 20 ADRs, including the ten "what broke" records. |
 | `docs/DO_NOT_BUILD.md` | Anti-scope. What not to build and why. |
 | `docs/HOW_TO_WORK.md` | Setup, the change loop, how to add a rule safely. |
