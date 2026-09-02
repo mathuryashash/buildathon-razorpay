@@ -1,0 +1,22 @@
+name: ci
+
+on:
+  push: {branches: [main]}
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install -r requirements.txt
+      - name: Unit tests
+        run: python -m pytest tests -q
+      - name: Red-team evaluation
+        # run_eval exits non-zero if the attack corpus is not fully blocked,
+        # so a rule change that quietly reopens a hole fails the build.
+        run: python evals/run_eval.py
+      - name: Demo runs end to end
+        run: python demo.py

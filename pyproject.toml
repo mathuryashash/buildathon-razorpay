@@ -1,0 +1,32 @@
+[project]
+name = "gatekeeper"
+version = "0.1.0"
+description = "A fail-closed capability proxy for AI agents that move money"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "pydantic>=2.5",
+    "pyyaml>=6.0",
+    "httpx>=0.26",
+    "razorpay>=1.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+llm = ["openai>=1.30"]
+
+[project.scripts]
+gatekeeper = "gatekeeper.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
