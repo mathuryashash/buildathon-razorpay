@@ -1,0 +1,36 @@
+# Static effect classification for every operation the proxy will proxy.
+#
+# RULE: if an operation is not listed here, the proxy DENIES it. Adding a new
+# tool is therefore a deliberate, reviewable act -- you cannot widen the blast
+# radius by accident.
+#
+# read              : cannot change state. Safe to allow broadly.
+# reversible_write  : creates something that can be cancelled or ignored at no
+#                     cost. A payment link nobody pays costs nothing.
+# irreversible_money: moves money in a way that cannot be undone without a
+#                     second money movement. Gated hardest.
+
+operations:
+  read:
+    - fetch_payment
+    - fetch_order
+    - fetch_payment_link
+    - fetch_all_payments
+    - fetch_settlement
+    - fetch_catalog
+
+  reversible_write:
+    - create_order
+    - create_payment_link
+    - update_payment_notes
+    - cancel_payment_link
+
+  irreversible_money:
+    - capture_payment
+    - create_refund
+    - create_payout
+    - create_transfer
+
+# Deliberately NOT listed, so they fail closed if a future tool exposes them:
+#   revoke_token, create_instant_settlement, delete_customer
+# See docs/DO_NOT_BUILD.md before adding anything here.
