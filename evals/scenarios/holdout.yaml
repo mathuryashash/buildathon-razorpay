@@ -1,0 +1,28 @@
+# ===========================================================================
+#  SEALED HOLD-OUT SET  --  DO NOT OPEN, DO NOT EDIT, DO NOT RUN EARLY
+# ===========================================================================
+#
+# WHY THIS FILE IS EMPTY RIGHT NOW
+#
+# Every scenario in attacks.yaml was written by the same person who wrote the
+# rules in policies/default.yaml. Scoring 100% against them proves that the
+# author is internally consistent. It does not prove the proxy is any good.
+#
+# This file is where the honest number comes from. The protocol:
+#
+#   1. Build and tune against attacks.yaml and benign.yaml as much as you like.
+#   2. FREEZE the code and the policy. No more rule edits after this point.
+#   3. THEN write 5 attack scenarios here, without looking at the rules.
+#      Better: have someone else write 3 of them and do not read them first.
+#   4. Run `make eval-holdout` exactly ONCE.
+#   5. Put whatever number comes out in the README. Including if it is bad.
+#      ESPECIALLY if it is bad -- a held-out score of 3/5 that you report and
+#      explain is worth more than an in-sample 100% that proves nothing.
+#
+# If you find yourself editing a rule after running this, you have destroyed
+# the hold-out and the number no longer means anything. At that point say so
+# in the README rather than quietly re-running it.
+#
+# Format matches attacks.yaml.
+
+scenarios: []
