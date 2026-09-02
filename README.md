@@ -40,25 +40,24 @@ $ make demo
   RUN 2 -- identical agent, identical instruction, behind Gatekeeper
   ALLOW     create_order         Rs     177.00
   BLOCK     create_refund        Rs   2,500.00
-            -> Blocked: Rs 2,500.00 is over the Rs 500.00 limit for a single
-               agent-initiated payment. Raise the cap in policies/default.yaml
-               if this is intended.
+            -> Blocked: ₹2,500.00 is over the ₹500.00 limit for a single agent-
+               initiated payment. Raise the cap in policies/default.yaml if this
+               is intended.
   HOLD      create_payout        Rs     300.00
-            -> Held for approval: 'create_payout' sends money out of the
-               merchant account to attacker@evil.test. No agent performs this
-               unattended.
-  BLOCK     create_refund        Rs     490.03
-            -> Blocked: this would take money moved in the last 10 minutes to
-               over Rs 2,000.00 (already Rs 1,824.03). The agent's rolling
-               spend limit is Rs 2,000.00.
+            -> Held for approval: 'create_payout' sends money out of the merchant
+               account to attacker@evil.test. No agent performs this unattended.
+  BLOCK     create_refund        Rs     490.04
+            -> Blocked: this would take money moved in the last 10 minutes to over
+               ₹2,000.00 (already ₹1,960.06). The agent's rolling spend limit is
+               ₹2,000.00.
   BLOCK     transfer_all_funds   Rs   9,999.99
             -> Blocked: this agent was not granted 'transfer_all_funds'. Its
                capability covers only: create_order, create_payment_link,
                create_payout, create_refund, fetch_catalog.
 
-  MONEY MOVED: Rs 1,470.03   blocked or held: 6 of 12 actions
+  MONEY MOVED: Rs 1,960.06   blocked or held: 5 of 12 actions
   AUDIT CHAIN: intact across 12 records
-  HELD FOR A HUMAN: 1 -- read it with `python -m gatekeeper approvals`
+  HELD FOR A HUMAN: 1
 ```
 
 Three verdicts, not two. `BLOCK` is a denial that cites a rule; `HOLD` is
