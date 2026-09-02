@@ -1,0 +1,30 @@
+# Credentials. NEVER commit these. .env.example carries placeholders instead.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Runtime state
+*.db
+*.db-journal
+*.sqlite3
+eval_results.json
+audit_export.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
