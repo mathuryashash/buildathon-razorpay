@@ -522,3 +522,58 @@ Nine of these ten records are not "we forgot to handle X". They are **a test
 that existed, passed, and tested something else** — or a document asserting a
 property the code did not have. Counting scenarios measures nothing. What
 matters is which rule actually fired, which is why that is now a test.
+
+---
+
+## ADR-021 — The hold-out ran. 15/21. Nothing gets fixed because of it.
+
+`ADR-011` above describes the protocol. This is what happened when it was
+followed.
+
+**Procedure.** Code and policy frozen at `git tag freeze`. Only then was
+`evals/scenarios/holdout.yaml` written, by a separate agent given the public
+promise, the merchant's customer ids, the operation list and the file format —
+and explicitly denied `policies/`, `gatekeeper/`, the other two corpora, the
+docs, the tests and the git history. It was instructed to record its honest
+prediction in each `expect` rather than the answer it wanted, and its
+narratives name the calls it expected the proxy to fail. Committed before the
+run. Run once.
+
+**Result: 15/21, 71.4%**, against 100% and 0% in-sample.
+
+**What it found.** Two of the six misses are the same hole, and it is a
+category the threat model never contained: every control in this project points
+at money *leaving*. An agent that can issue payment links controls money
+*arriving*, and can point it at an attacker without the merchant's balance ever
+moving. `DEST-001` is scoped to refunds; the grant ceilings are denominated in
+money moved. Nothing in the system looks at it. The reviewer predicted that
+failure in writing, before the run.
+
+The others: no ownership check binding a refund to the payment it refunds; a
+₹500 per-action cap sitting below the merchant's own ₹740 top product price, so
+a full refund on the most expensive item in the shop is impossible; and one
+disagreement about digit-string amounts that is defensible either way.
+
+**The decision this ADR exists to record: none of it is fixed.**
+
+The temptation is obvious. Each fix is small, and the number would go up. But
+the number would then be measuring a proxy that had been tuned against the very
+scenarios scoring it, which is the thing `DO_NOT_BUILD.md` item 1 exists to
+prevent, and there is no second hold-out to fall back on. A test case cannot be
+un-seen.
+
+The choice was: a better proxy with a meaningless number, or a worse proxy with
+a real one and four findings written down. A panel can do something with the
+second. The first is indistinguishable from the in-sample 100%, which is
+indistinguishable from nothing.
+
+**The generalisable lesson, which is the reason this ADR is longer than the
+finding.** The five bugs in round one came from verifying the build. The five
+in round two came from an adversarial reviewer who could see everything. The
+hole in round three came from a reviewer who could see **nothing** — and it is
+the only one that was a whole missing category rather than a broken control.
+
+An author cannot see past their own framing, and rereading the threat model is
+not a way out of it: the model is the framing. Three different kinds of blindness
+needed three different kinds of reader, and the blindest reader found the
+biggest gap.

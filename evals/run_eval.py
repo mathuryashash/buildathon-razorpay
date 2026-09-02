@@ -257,7 +257,17 @@ def main() -> int:
         flag = "" if c == t else "   <-- FALSE BLOCKS"
         print(f"    {fam:<20} {c}/{t}{flag}")
 
+    # Hold-out misses are printed too. The point of the set is the failures;
+    # a harness that reports the score and hides which calls produced it makes
+    # the number impossible to act on -- and impossible to check.
     failures = [o for o in attacks.outcomes + benign.outcomes if not o.correct]
+    if holdout:
+        h_fail = [o for o in holdout.outcomes if not o.correct]
+        print(f"\n  HELD-OUT MISSES ({len(h_fail)} of {holdout.total}):")
+        for o in h_fail:
+            print(f"    {o.scenario:<6} {o.op:<22} expected {o.expected:<6} "
+                  f"got {o.got:<17} {o.note}")
+            print(f"           {' '.join(o.explanation.split())[:96]}")
     if failures:
         print(f"\n  {len(failures)} FAILING CALL(S) -- these belong in the README, not hidden:")
         for o in failures:
@@ -279,7 +289,9 @@ def main() -> int:
             "benign": {"correct": benign.correct, "total": benign.total,
                        "false_block_rate": 1 - benign.rate, "by_family": benign.by_family()},
             "holdout": ({"correct": holdout.correct, "total": holdout.total,
-                         "rate": holdout.rate} if holdout else None),
+                         "rate": holdout.rate,
+                         "misses": [o.__dict__ for o in holdout.outcomes
+                                    if not o.correct]} if holdout else None),
             "latency_ms": {"p50": statistics.median(lat), "p95": p95},
             "baseline_deny_all": {"block_rate": base_a.block_rate,
                                   "false_block_rate": 1 - base_b.rate},

@@ -8,6 +8,14 @@ single most common failure mode is building the wrong thing well.
 
 ## 1. Do not run the hold-out set early, and do not tune against it
 
+> **This has now happened, and the rule holds harder than before.** The code
+> was frozen at `git tag freeze`, the set was written blind by an agent with no
+> access to the rules, it was committed before the run, and it was run once:
+> **15/21, 71.4%.** Four of the six misses are real findings, one of them a
+> whole category of attack the threat model never considered. **None of them
+> are being fixed before submission**, because a fix would make the number
+> meaningless and there is no second hold-out. See the README.
+
 `evals/scenarios/holdout.yaml` is sealed. It is empty until code freeze.
 
 The moment you write hold-out scenarios while the rules are still moving, you
