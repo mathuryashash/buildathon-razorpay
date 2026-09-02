@@ -50,7 +50,7 @@ tamper-evident audit trail.
 > fail-closed capability proxy that enforces spend bounds, velocity limits and
 > approval thresholds, and writes a tamper-evident audit trail in language a
 > merchant can read. I measured it on 20 adversarial and 14 benign scenarios —
-> 67 calls — because a firewall that blocks everything scores 100%, and only the
+> 145 calls — because a firewall that blocks everything scores 100%, and only the
 > false-block rate tells you whether it's usable.
 
 ### Technical summary
@@ -75,7 +75,7 @@ tamper-evident audit trail.
 > that a compromised agent cannot exceed.
 
 ### Architecture decisions
-See `ARCHITECTURE.md` and `docs/DECISIONS.md` (11 ADRs). The three worth
+See `ARCHITECTURE.md` and `docs/DECISIONS.md` (20 ADRs). The three worth
 defending: the proxy holds the credential rather than observing the agent
 (ADR-001); undeclared operations are denied rather than inferred (ADR-002);
 policy is data rather than prompt text (ADR-003).

@@ -74,13 +74,22 @@ def verify(token: str, *, secret: str, now: float | None = None) -> Capability:
     except ValueError as e:
         raise TokenError("malformed capability token") from e
 
-    expected = _b64e(hmac.new(secret.encode(), body.encode(), hashlib.sha256).digest())
+    # compare_digest raises TypeError on a str containing non-ASCII, and
+    # Starlette decodes headers as latin-1, so one high byte in an
+    # Authorization header crashed the proxy before it had authenticated
+    # anything. Compare bytes instead: no exception, same constant-time
+    # guarantee. A signature that is not ASCII is simply not a signature.
+    expected = _b64e(hmac.new(secret.encode(), body.encode("utf-8", "replace"),
+                              hashlib.sha256).digest())
     # Constant-time compare: a timing oracle on the signature would let an
     # attacker forge a capability byte by byte.
-    if not hmac.compare_digest(sig, expected):
+    if not hmac.compare_digest(sig.encode("utf-8", "replace"), expected.encode()):
         raise TokenError("bad signature on capability token")
 
-    cap = Capability(**json.loads(_b64d(body)))
+    try:
+        cap = Capability(**json.loads(_b64d(body)))
+    except Exception as e:  # malformed base64, bad JSON, missing fields
+        raise TokenError("capability token payload is not a valid capability") from e
     if cap.exp < (now if now is not None else time.time()):
         raise TokenError("capability token expired")
     return cap

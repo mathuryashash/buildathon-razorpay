@@ -33,12 +33,19 @@ agent                proxy                                    backend
   │                    ├─ 3. classify effect ─ undecl ─▶ (policy denies)
   │                    ├─ 4. evaluate policy ── deny ─▶ DENY + audit
   │                    │                    ── approve ▶ HOLD + audit + queue
-  │                    ├─ 5. idempotency ───── hit ──▶ replay cached + audit
-  │                    ├─ 6. execute ──────────────────────▶ │
+  │                    ├─ 5. grant ceilings ── over ─▶ DENY + audit
+  │                    ├─ 6. idempotency ───── hit ──▶ replay cached + audit
+  │                    ├─ 7. execute ──────────────────────▶ │
   │                    │◀───────────────────────────────────┤
-  │                    ├─ 7. append audit (hash-chained)
+  │                    ├─ 8. append audit (hash-chained)
   │◀── ActionResult ───┤
 ```
+
+The whole of this runs under one process-wide lock, and anything that raises
+anywhere inside it is caught, denied and audited. Neither was true before
+ADR-019 and ADR-020: twelve concurrent requests executed the same idempotency
+key seven times, and an unhandled exception in steps 1-6 returned a bare 500
+with no audit record at all.
 
 **Why this order.** Token before scope: you cannot check a grant you have not
 authenticated. Scope before policy: a cheap exact-match rejection before the
@@ -47,7 +54,16 @@ distinct message from "you were given this but not right now". Effect before
 policy: the policy's fail-closed rule needs the classification, including its
 absence. **Idempotency before execution:** this is the one that matters — after
 execution, a retry storm has already charged the customer twenty times and the
-cache only prevents the twenty-first. Audit last and always, including denials.
+cache only prevents the twenty-first. **Grant ceilings after policy**, though
+they are cheaper: the default grant mirrors the default policy numbers, so
+checking it first shadows `CAP-001` and `VEL-001` entirely and every denial
+reads "your capability caps this" instead of naming the rule and the threat
+behind it (ADR-014). A grant can only ever narrow further, so deferring it
+lets nothing through. Audit last and always, including denials.
+
+**Ordering alone is not enough.** For most of this project's life the order
+above was correct and the retry-storm guarantee was still false, because the
+read-modify-write it describes was not atomic. See ADR-019.
 
 ## Data contracts
 

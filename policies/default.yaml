@@ -74,6 +74,47 @@ rules:
       Held for approval: {amount} is above the ₹5,000.00 threshold for
       agent-created payment requests.
 
+  # ---- T8: the amount field itself is the bypass ------------------------
+
+  - id: AMT-001
+    threat: T8
+    description: >
+      An amount the proxy cannot read as a whole number of paise is denied
+      rather than treated as zero.
+      This rule exists because of a shipped bug. The old parser accepted only
+      int and digit-string and collapsed everything else to 0, so
+      {"amount": 250000.0} -- an ordinary JSON float -- was evaluated as a
+      zero-rupee action and went straight past the per-action cap and every
+      velocity rule. A negative int did the same. The attack corpus tested a
+      string-typed amount and missed the float entirely.
+      See docs/DECISIONS.md ADR-013 and attack scenarios F1-05..F1-07.
+    when:
+      amount_invalid: true
+    action: deny
+    explain: >-
+      Blocked: the amount on this '{op}' could not be read as a whole number
+      of paise (received {raw_amount}). Gatekeeper denies an amount it cannot
+      evaluate rather than assuming it is zero.
+
+  - id: AMT-002
+    threat: T8
+    description: >
+      An irreversible money action with no amount field at all is denied.
+      "Absent" and "unreadable" are different, and absent used to be read as a
+      valid zero -- which passes every cap in this file, because every cap
+      asks whether a number is too big. Razorpay's refund API reads an omitted
+      amount as the FULL payment, so the one request no rule could bound was
+      also the largest one it could make. See docs/DECISIONS.md ADR-013.
+      Reads and reversible writes are unaffected: a fetch has no amount and
+      never should.
+    when:
+      effect_in: [irreversible_money]
+      amount_missing: true
+    action: deny
+    explain: >-
+      Blocked: '{op}' moves money but names no amount. Gatekeeper will not
+      execute a money action whose size it cannot bound.
+
   # ---- T2: a compromised agent drains the account in many small actions -
 
   - id: VEL-001
@@ -89,7 +130,7 @@ rules:
       corpus caught it (B1-02, B1-03). See docs/DECISIONS.md ADR-006.
     when:
       effect_in: [irreversible_money]
-      window_sum_paise_gt: 200000
+      money_moved_paise_gt: 200000
     action: deny
     explain: >-
       Blocked: this would take money moved in the last 10 minutes to over
@@ -105,7 +146,7 @@ rules:
       broken, and that is what this catches.
     when:
       effect_in: [reversible_write]
-      window_count_gt: 20
+      window_count_gte: 20
     action: deny
     explain: >-
       Blocked: {window_count} agent actions in the last 10 minutes. Even
@@ -116,7 +157,7 @@ rules:
     description: At most 5 money-moving actions in any 10-minute window.
     when:
       effect_in: [irreversible_money]
-      money_count_gt: 5
+      money_count_gte: 5
     action: deny
     explain: >-
       Blocked: {money_count} payments already in the last 10 minutes. The
@@ -127,7 +168,7 @@ rules:
     description: At most 3 charges to the same counterparty in any 10-minute window.
     when:
       effect_in: [irreversible_money]
-      counterparty_count_gt: 3
+      counterparty_count_gte: 3
     action: deny
     explain: >-
       Blocked: this would be charge number {counterparty_count} to
@@ -162,15 +203,23 @@ rules:
 
   - id: DEST-001
     threat: T4
-    description: Refunds may only be issued to a counterparty seen in this session.
+    description: >
+      Every destination named on a refund must be a customer of this merchant,
+      and a refund must name one.
+      `counterparty_not_in` matches if ANY destination field is outside the
+      list, and also if the request names none. Both were holes: an absent
+      destination could not match the rule, so dropping the field executed the
+      refund; and with several destination fields set only the first was read,
+      so an allowlisted `customer_id` sitting beside an attacker's `upi_id`
+      passed. See docs/DECISIONS.md ADR-017.
     when:
       op_in: [create_refund]
       counterparty_not_in: ["cust_demo_001", "cust_demo_002", "cust_demo_003"]
     action: deny
     explain: >-
-      Blocked: {counterparty} is not a known customer of this merchant. A
-      refund to an unknown recipient is how an injected instruction exfiltrates
-      money.
+      Blocked: this refund names {counterparties}, which is not a known
+      customer of this merchant. A refund to an unknown or unstated recipient
+      is how an injected instruction exfiltrates money.
 
   # ---- T5: unattended out-of-hours activity ----------------------------
 

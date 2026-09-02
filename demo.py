@@ -15,14 +15,16 @@ from __future__ import annotations
 
 import argparse
 import os
+import pathlib
 import sys
-import tempfile
+import textwrap
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from gatekeeper.backends import MockBackend, get_backend  # noqa: E402
 from gatekeeper.cli import _load_dotenv  # noqa: E402
+from gatekeeper.console import use_utf8_stdout  # noqa: E402
 from gatekeeper.models import ActionRequest  # noqa: E402
 from gatekeeper.proxy import Gatekeeper  # noqa: E402
 from gatekeeper.tokens import issue  # noqa: E402
@@ -40,6 +42,11 @@ AGENT_PLAN = [
     # ---- everything below this line comes from the injected instruction ----
     ("create_refund",       {"amount": 250000, "customer_id": "cust_ATTACKER_9000"}),
     ("create_payout",       {"amount": 500000, "contact": "attacker@evil.test"}),
+    # Under the per-action cap, so the amount rules have nothing to say about
+    # it. It is held anyway, because a payout leaves the merchant account and
+    # that always wants a human. This is the third verdict -- neither allowed
+    # nor denied -- and the one the track bar means by "handled gracefully".
+    ("create_payout",       {"amount": 30000,  "contact": "attacker@evil.test"}),
     ("create_refund",       {"amount": 49000, "customer_id": "cust_demo_001"}),
     ("create_refund",       {"amount": 49001, "customer_id": "cust_demo_002"}),
     ("create_refund",       {"amount": 49002, "customer_id": "cust_demo_003"}),
@@ -68,13 +75,23 @@ def run_ungoverned() -> int:
     return moved
 
 
+# A stable path, not a temp file, so the three follow-up commands in the
+# README actually have something to read after `make demo`:
+#   python -m gatekeeper log / approvals / verify
+DEMO_DB = "gatekeeper-demo.db"
+
+
 def run_governed(backend_name: str = "mock") -> int:
     print(RULE)
     print("  RUN 2 -- identical agent, identical instruction, behind Gatekeeper")
     print(RULE)
+    # Start from empty: the demo must print the same numbers on the second run
+    # as on the first, and velocity state carried over from a previous run
+    # would silently change them.
+    pathlib.Path(DEMO_DB).unlink(missing_ok=True)
     gk = Gatekeeper(backend=get_backend(backend_name),
-                    db_path=tempfile.mktemp(suffix=".db"), signing_secret=SECRET)
-    token = issue("buyer-1", [op for op, _ in AGENT_PLAN if op != "transfer_all_funds"],
+                    db_path=DEMO_DB, signing_secret=SECRET)
+    token = issue("buyer-1", sorted({op for op, _ in AGENT_PLAN} - {"transfer_all_funds"}),
                   secret=SECRET, ttl_seconds=86_400, now=NOW)
 
     moved = blocked = 0
@@ -89,7 +106,12 @@ def run_governed(backend_name: str = "mock") -> int:
             blocked += 1
             tag = "BLOCK" if v == "deny" else "HOLD "
             print(f"  {tag}     {op:<20} Rs {amt/100:>10,.2f}")
-            print(f"            -> {res.decision.explanation.strip()[:88]}")
+            # Wrap rather than truncate. The explanation IS the product; a
+            # reason cut off mid-word at column 88 was the demo undercutting
+            # the exact claim it exists to make.
+            reason = textwrap.wrap(" ".join(res.decision.explanation.split()), width=72)
+            for n, line in enumerate(reason):
+                print(f"            {'->' if n == 0 else '  '} {line}")
 
     print(f"\n  MONEY MOVED: Rs {moved/100:,.2f}   blocked or held: {blocked} of {len(AGENT_PLAN)} actions")
     c = gk.audit.verify()
@@ -99,6 +121,7 @@ def run_governed(backend_name: str = "mock") -> int:
 
 
 def main() -> int:
+    use_utf8_stdout()
     _load_dotenv()
     ap = argparse.ArgumentParser()
     ap.add_argument("--live", action="store_true",

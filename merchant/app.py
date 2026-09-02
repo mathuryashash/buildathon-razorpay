@@ -11,7 +11,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 
-CATALOG = json.loads((Path(__file__).parent / "catalog.json").read_text())
+CATALOG = json.loads((Path(__file__).parent / "catalog.json").read_text(encoding="utf-8"))
 
 app = FastAPI(title="Acme Organics (reference merchant)", version="0.1.0")
 

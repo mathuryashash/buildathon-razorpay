@@ -35,12 +35,22 @@ PRECEDENCE = {Verdict.DENY: 3, Verdict.REQUIRE_APPROVAL: 2, Verdict.ALLOW: 1}
 
 
 class Context(Protocol):
-    """What the engine can ask about history. Implemented by AuditLog."""
+    """What the engine can ask about history. Implemented by AuditLog.
 
-    def window_sum_paise(self, agent_id: str, seconds: int) -> int: ...
+    `now` is not optional here on purpose. Both implementations default it to
+    the wall clock, and an engine that silently took that default while the
+    proxy evaluated against an injected timestamp compared window edges from
+    one clock against record timestamps from another -- velocity simply stopped
+    applying. See docs/DECISIONS.md ADR-012.
+    """
+
+    def window_sum_paise(
+        self, agent_id: str, seconds: int, *,
+        effect: str | None = ..., now: float,
+    ) -> int: ...
     def window_count(
         self, agent_id: str, seconds: int, *,
-        counterparty: str | None = ..., effect: str | None = ...,
+        counterparty: str | None = ..., effect: str | None = ..., now: float,
     ) -> int: ...
 
 
@@ -53,27 +63,46 @@ class EvalFacts:
     amount_paise: int
     counterparty: str | None
     agent_id: str
-    window_sum_paise: int
+    money_moved_paise: int     # value of executed IRREVERSIBLE_MONEY only
     window_count: int          # every executed action
     money_count: int           # executed irreversible_money actions only
     counterparty_count: int    # executed money actions to THIS counterparty
     hour_local: int
+    amount_valid: bool = True  # False when the agent sent an unreadable amount
+    amount_missing: bool = False   # no `amount` key on the request at all
+    raw_amount: str = ""       # as sent, for the denial message only
+    counterparties: tuple[str, ...] = ()   # EVERY destination named, not just the first
 
 
 ConditionFn = Callable[[Any, EvalFacts], bool]
 
+# Every name here says exactly what the predicate does, including whether the
+# comparison is strict. Four of these used to end `_gt` while comparing with
+# `>=`, in the one file whose entire selling point is that a merchant can read
+# it and know what it means.
 CONDITIONS: dict[str, ConditionFn] = {
     "amount_paise_gt": lambda v, f: f.amount_paise > int(v),
     "amount_paise_lte": lambda v, f: f.amount_paise <= int(v),
-    "window_sum_paise_gt": lambda v, f: f.window_sum_paise + f.amount_paise > int(v),
-    "window_count_gt": lambda v, f: f.window_count >= int(v),
-    "money_count_gt": lambda v, f: f.money_count >= int(v),
-    "counterparty_count_gt": lambda v, f: f.counterparty_count >= int(v),
+    # Would THIS action push money moved in the window past the ceiling?
+    # Counts irreversible_money only -- see EvalFacts.money_moved_paise.
+    "money_moved_paise_gt": lambda v, f: f.money_moved_paise + f.amount_paise > int(v),
+    "window_count_gte": lambda v, f: f.window_count >= int(v),
+    "money_count_gte": lambda v, f: f.money_count >= int(v),
+    "counterparty_count_gte": lambda v, f: f.counterparty_count >= int(v),
     "op_in": lambda v, f: f.op in set(v),
     "effect_in": lambda v, f: f.effect is not None and f.effect.value in set(v),
     "effect_undeclared": lambda v, f: (f.effect is None) is bool(v),
-    "counterparty_not_in": lambda v, f: f.counterparty is not None and f.counterparty not in set(v),
+    # True when ANY destination on the request is outside the allowlist, and
+    # also when the request names no destination at all. Both used to pass:
+    # an absent field could not match, and with several destination fields set
+    # only the first was ever examined, so an allowlisted decoy hid the real
+    # one. See ADR-017.
+    "counterparty_not_in": lambda v, f: (
+        not f.counterparties or any(c not in set(v) for c in f.counterparties)
+    ),
     "hour_outside": lambda v, f: not (int(v[0]) <= f.hour_local < int(v[1])),
+    "amount_invalid": lambda v, f: (not f.amount_valid) is bool(v),
+    "amount_missing": lambda v, f: f.amount_missing is bool(v),
 }
 
 
@@ -108,10 +137,12 @@ class Rule:
             op=facts.op,
             effect=facts.effect.value if facts.effect else "undeclared",
             counterparty=facts.counterparty or "unknown recipient",
-            window_total=f"₹{facts.window_sum_paise / 100:,.2f}",
+            window_total=f"₹{facts.money_moved_paise / 100:,.2f}",
             window_count=facts.window_count,
             money_count=facts.money_count,
             counterparty_count=facts.counterparty_count,
+            raw_amount=facts.raw_amount,
+            counterparties=", ".join(facts.counterparties) or "no destination at all",
         )
 
 
@@ -123,7 +154,7 @@ class PolicyEngine:
     @classmethod
     def load(cls, path: Path | str | None = None) -> "PolicyEngine":
         p = Path(path) if path else DEFAULT_PATH
-        raw = yaml.safe_load(p.read_text()) or {}
+        raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
         rules = []
         seen: set[str] = set()
         for r in raw.get("rules") or []:
@@ -151,22 +182,29 @@ class PolicyEngine:
         agent_id: str,
         ctx: Context,
         hour_local: int,
+        now: float,
     ) -> Decision:
         cp = request.counterparty
+        w = self.window_seconds
         facts = EvalFacts(
             op=request.op,
             effect=effect,
             amount_paise=request.amount_paise,
             counterparty=cp,
             agent_id=agent_id,
-            window_sum_paise=ctx.window_sum_paise(agent_id, self.window_seconds),
-            window_count=ctx.window_count(agent_id, self.window_seconds),
-            money_count=ctx.window_count(agent_id, self.window_seconds,
+            money_moved_paise=ctx.window_sum_paise(
+                agent_id, w, now=now, effect=Effect.IRREVERSIBLE_MONEY.value),
+            window_count=ctx.window_count(agent_id, w, now=now),
+            money_count=ctx.window_count(agent_id, w, now=now,
                                          effect=Effect.IRREVERSIBLE_MONEY.value),
             counterparty_count=(
-                ctx.window_count(agent_id, self.window_seconds, counterparty=cp,
+                ctx.window_count(agent_id, w, now=now, counterparty=cp,
                                  effect=Effect.IRREVERSIBLE_MONEY.value) if cp else 0),
             hour_local=hour_local,
+            amount_valid=request.amount_is_valid,
+            amount_missing=request.amount_missing,
+            raw_amount=request.raw_amount,
+            counterparties=tuple(request.counterparties),
         )
 
         hits: list[RuleHit] = []

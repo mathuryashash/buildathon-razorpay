@@ -10,6 +10,12 @@ argues against. A deny-all baseline is included in the output for exactly that
 reason -- it scores a perfect block rate and a catastrophic false-block rate,
 which is the point.
 
+Two different numbers get reported for the attack corpus and they are not
+interchangeable. `verdict match` is how many calls did what the scenario said
+they should, including the ones a multi-step attack needs to succeed before it
+becomes an attack. `BLOCK RATE` is the one that means what it sounds like:
+of the calls that must be stopped, how many were.
+
 Every scenario runs against a FRESH database so velocity state cannot leak
 between scenarios. Time is injected, never read from the clock, so results are
 reproducible.
@@ -18,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import statistics
 import sys
 import tempfile
@@ -32,6 +39,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from gatekeeper.backends import MockBackend  # noqa: E402
+from gatekeeper.console import use_utf8_stdout  # noqa: E402
 from gatekeeper.models import ActionRequest  # noqa: E402
 from gatekeeper.proxy import Gatekeeper  # noqa: E402
 from gatekeeper.tokens import issue  # noqa: E402
@@ -45,6 +53,12 @@ GRANTED = [
     "fetch_all_payments", "fetch_settlement",
     "create_order", "create_payment_link", "update_payment_notes",
     "cancel_payment_link", "capture_payment", "create_refund", "create_payout",
+    # In scope on purpose, and deliberately absent from policies/effects.yaml.
+    # F3-04 claims to test that registry lookup is exact rather than fuzzy;
+    # while this was out of scope the proxy's scope check (SCOPE-000) stopped
+    # it at step 2 and the registry was never consulted at all. The scenario
+    # passed without exercising the thing it names.
+    "Create_Refund",
 ]
 
 BASE_TS = datetime(2026, 9, 4, 14, 0, 0).timestamp()  # a Friday afternoon
@@ -80,7 +94,32 @@ class Corpus:
 
     @property
     def rate(self) -> float:
+        """Fraction of calls whose verdict matched expectation.
+
+        NOT a block rate. Multi-step attack scenarios contain calls that are
+        SUPPOSED to succeed -- a salami-slice is only an attack once the
+        running total crosses the ceiling, so its first four refunds carry
+        `expect: allow`. 19 of the 41 attack-corpus calls are like that.
+        Calling this a block rate is what let the deny-all baseline print a
+        "block rate" of 53.7% for a proxy that denies literally everything,
+        two lines below a comment claiming it would score a perfect one.
+        Use `block_rate` for the number that means what it says.
+        """
         return self.correct / self.total if self.total else 0.0
+
+    @property
+    def blocking_calls(self) -> int:
+        """Calls that are supposed to be stopped."""
+        return sum(1 for o in self.outcomes if _normalise(o.expected) == "deny")
+
+    @property
+    def blocked(self) -> int:
+        return sum(1 for o in self.outcomes
+                   if _normalise(o.expected) == "deny" and o.correct)
+
+    @property
+    def block_rate(self) -> float:
+        return self.blocked / self.blocking_calls if self.blocking_calls else 0.0
 
     def by_family(self) -> dict[str, tuple[int, int]]:
         agg: dict[str, list[int]] = {}
@@ -92,7 +131,7 @@ class Corpus:
 
 
 def _load(path: Path) -> list[dict[str, Any]]:
-    return (yaml.safe_load(path.read_text()) or {}).get("scenarios", [])
+    return (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("scenarios", [])
 
 
 def _normalise(verdict: str) -> str:
@@ -102,15 +141,27 @@ def _normalise(verdict: str) -> str:
 
 def run_corpus(scenarios: list[dict[str, Any]], label: str, *, deny_all: bool = False) -> Corpus:
     corpus = Corpus(label)
-    for sc in scenarios:
-        db = tempfile.mktemp(suffix=".db")  # fresh state per scenario
+    tmpdir = tempfile.mkdtemp(prefix="gatekeeper-eval-")
+    for n, sc in enumerate(scenarios):
+        # Fresh state per scenario so velocity cannot leak between them, in a
+        # directory that gets removed at the end -- mktemp() leaked one file
+        # per scenario per corpus pass and never cleaned any of them up.
+        db = str(Path(tmpdir) / f"{n:03d}.db")
         gk = Gatekeeper(backend=MockBackend(), db_path=db, signing_secret=SECRET)
         good = issue("eval-agent", GRANTED, secret=SECRET, ttl_seconds=86_400, now=BASE_TS)  # long TTL covers hour-shifted scenarios
         forged = good[:-4] + "AAAA"
         expired = issue("eval-agent", GRANTED, secret=SECRET, ttl_seconds=-10, now=BASE_TS)
+        # A grant deliberately tighter than merchant policy: Rs 100 per action,
+        # Rs 250 per window, against policy's Rs 500 / Rs 2,000. Scenarios that
+        # ask for `token: narrow` test that the narrower of the two actually
+        # binds -- these two fields were carried in every token and enforced
+        # nowhere until ADR-014.
+        narrow = issue("eval-agent", GRANTED, secret=SECRET, ttl_seconds=86_400,
+                       now=BASE_TS, max_action_paise=10_000, max_window_paise=25_000)
 
         for i, call in enumerate(sc["calls"]):
-            token = {"forged": forged, "expired": expired}.get(call.get("token"), good)
+            token = {"forged": forged, "expired": expired,
+                     "narrow": narrow}.get(call.get("token"), good)
             hour = call.get("hour")
             ts = BASE_TS + i * 5 if hour is None else \
                 datetime(2026, 9, 4, hour, 30, 0).timestamp()
@@ -142,10 +193,12 @@ def run_corpus(scenarios: list[dict[str, Any]], label: str, *, deny_all: bool = 
                 scenario=sc["id"], family=sc.get("family", "unknown"), op=call["op"],
                 expected=expected, got=got, correct=correct, latency_ms=latency,
                 explanation=expl, executed=executed, replayed=replayed, note=note))
+    shutil.rmtree(tmpdir, ignore_errors=True)
     return corpus
 
 
 def main() -> int:
+    use_utf8_stdout()
     ap = argparse.ArgumentParser(description="Run the Gatekeeper red-team evaluation")
     ap.add_argument("--holdout", action="store_true",
                     help="ALSO run evals/scenarios/holdout.yaml. Run this ONCE, after "
@@ -171,18 +224,28 @@ def main() -> int:
     print("=" * 74)
     print("  GATEKEEPER EVALUATION")
     print("=" * 74)
-    print(f"  Attack corpus : {attacks.correct:>3}/{attacks.total:<3} blocked        "
-          f"block rate        {attacks.rate:6.1%}")
+    print(f"  Attack corpus : {attacks.correct:>3}/{attacks.total:<3} as expected    "
+          f"verdict match     {attacks.rate:6.1%}")
+    print(f"    of which     : {attacks.blocked:>3}/{attacks.blocking_calls:<3} stopped        "
+          f"BLOCK RATE        {attacks.block_rate:6.1%}")
+    print(f"                    ({attacks.total - attacks.blocking_calls} attack-corpus calls "
+          f"are steps that must succeed first)")
     print(f"  Benign corpus : {benign.total - benign.correct:>3}/{benign.total:<3} wrongly blocked "
           f"false-block rate  {1 - benign.rate:6.1%}")
     if holdout:
         print(f"  HELD OUT      : {holdout.correct:>3}/{holdout.total:<3} correct        "
               f"held-out score    {holdout.rate:6.1%}")
-    print(f"  Latency       : p50 {statistics.median(lat):.2f} ms   p95 {p95:.2f} ms")
+    # End to end around gk.handle(): token verify, scope, effect lookup, all
+    # rules, the grant ceilings, the idempotency read, the mock backend call
+    # and the audit write and commit. Not "policy latency" -- the SQLite
+    # commit dominates it, and quoting the rules-only number would be
+    # flattering the part that was never going to be slow.
+    print(f"  Proxy overhead: p50 {statistics.median(lat):.2f} ms   p95 {p95:.2f} ms"
+          f"   (end to end, incl. audit write)")
     print("-" * 74)
-    print(f"  Baseline (deny everything): block rate {base_a.rate:.1%}, "
-          f"false-block rate {1 - base_b.rate:.1%}")
-    print("  ^ why a block rate alone is not a result.")
+    print(f"  Baseline (deny everything): block rate {base_a.block_rate:.1%}, "
+          f"false-block rate {1 - base_b.block_rate if base_b.blocking_calls else 1 - base_b.rate:.1%}")
+    print("  ^ a perfect block rate, and unusable. Why a block rate alone is not a result.")
     print("-" * 74)
 
     print("\n  ATTACK FAMILIES")
@@ -208,14 +271,18 @@ def main() -> int:
 
     if args.json:
         Path(args.json).write_text(json.dumps({
-            "attack": {"correct": attacks.correct, "total": attacks.total, "rate": attacks.rate,
+            "attack": {"correct": attacks.correct, "total": attacks.total,
+                       "verdict_match_rate": attacks.rate,
+                       "blocked": attacks.blocked, "blocking_calls": attacks.blocking_calls,
+                       "block_rate": attacks.block_rate,
                        "by_family": attacks.by_family()},
             "benign": {"correct": benign.correct, "total": benign.total,
                        "false_block_rate": 1 - benign.rate, "by_family": benign.by_family()},
             "holdout": ({"correct": holdout.correct, "total": holdout.total,
                          "rate": holdout.rate} if holdout else None),
             "latency_ms": {"p50": statistics.median(lat), "p95": p95},
-            "baseline_deny_all": {"block_rate": base_a.rate, "false_block_rate": 1 - base_b.rate},
+            "baseline_deny_all": {"block_rate": base_a.block_rate,
+                                  "false_block_rate": 1 - base_b.rate},
             "failures": [o.__dict__ for o in failures],
         }, indent=2, default=str))
         print(f"  raw results -> {args.json}\n")

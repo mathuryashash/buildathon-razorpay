@@ -35,10 +35,15 @@ def derive_key(agent_id: str, op: str, args: dict[str, Any], client_key: str | N
 
 class IdempotencyStore:
     def __init__(self, path: Path | str = "gatekeeper.db"):
-        self._conn = sqlite3.connect(str(path), check_same_thread=False)
+        self._conn = sqlite3.connect(str(path), check_same_thread=False, timeout=30.0)
         self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=30000")
         self._conn.executescript(SCHEMA)
         self._conn.commit()
+
+    def close(self) -> None:
+        self._conn.close()
 
     def get(self, key: str) -> dict[str, Any] | None:
         row = self._conn.execute("SELECT result FROM idem WHERE key=?", (key,)).fetchone()

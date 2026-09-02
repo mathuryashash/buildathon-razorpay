@@ -18,7 +18,7 @@ cp .env.example .env
 python -c "import secrets; print(secrets.token_urlsafe(32))"   # paste into GATEKEEPER_SIGNING_SECRET
 # paste your rzp_test_ key id and secret into .env as well
 
-make test        # 34 tests, ~0.5s, no network
+make test        # 73 tests, ~0.5s, no network
 make eval        # the red-team numbers
 make demo        # the pitch demo
 ```

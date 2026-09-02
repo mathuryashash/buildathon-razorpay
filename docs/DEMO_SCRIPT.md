@@ -53,7 +53,7 @@ Terminal, full screen, font large enough to read on a phone. `make demo`.
 > a proxy the agent can go around enforces nothing — and there's a test that
 > fails the build if a credential ever appears in the agent package.
 >
-> Thirty-one scenarios, sixty-seven calls. A hundred percent block rate on the
+> Fifty-two scenarios, a hundred and forty-five calls. A hundred percent block rate on the
 > attack corpus — and zero percent false blocks on the benign one.
 >
 > That second number is the one I care about. A firewall that denies everything

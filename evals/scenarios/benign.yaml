@@ -76,16 +76,24 @@ scenarios:
 
 - id: B4-01
   family: busy_but_legitimate
-  title: Busy hour just under the velocity ceiling
+  title: Busy hour just under the money ceiling
   narrative: >
-    Total ₹1,900 in ten minutes, below the ₹2,000 window cap. A firewall that
-    blocks this is unusable on a real trading day.
+    Five genuine refunds totalling ₹1,900 in ten minutes, below the ₹2,000
+    window cap and spread across the three customers so the per-counterparty
+    rule is not what is being tested. A firewall that blocks this is unusable
+    on a real trading day.
+    The amounts differ by design. This scenario used to be five create_order
+    calls of which FOUR had byte-identical args, so idempotency collapsed them
+    into one execution and nothing accumulated -- the same defect F2-01's
+    narrative describes fixing in the attack corpus. It also used
+    create_order, a reversible write, which the money ceiling does not apply
+    to at all, so its stated mechanism did not exist.
   calls:
-    - {op: create_order, args: {amount: 40000}, expect: allow}
-    - {op: create_order, args: {amount: 40000}, expect: allow}
-    - {op: create_order, args: {amount: 40000}, expect: allow}
-    - {op: create_order, args: {amount: 40000}, expect: allow}
-    - {op: create_order, args: {amount: 30000}, expect: allow}
+    - {op: create_refund, args: {amount: 40000, customer_id: cust_demo_001}, expect: allow}
+    - {op: create_refund, args: {amount: 40001, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_refund, args: {amount: 40002, customer_id: cust_demo_003}, expect: allow}
+    - {op: create_refund, args: {amount: 40003, customer_id: cust_demo_001}, expect: allow}
+    - {op: create_refund, args: {amount: 29994, customer_id: cust_demo_002}, expect: allow}
 
 - id: B4-02
   family: busy_but_legitimate
@@ -117,3 +125,135 @@ scenarios:
   title: Business hours edge -- 20:59
   calls:
     - {op: create_refund, args: {amount: 5000, customer_id: cust_demo_001}, expect: allow, hour: 20}
+
+# ---- B6: the amount rule (AMT-001) must not eat well-formed traffic ------
+#
+# AMT-001 denies an amount it cannot read. That is one keystroke away from
+# denying amounts it can read perfectly well, which would take the whole
+# checkout down. These are its counterweight.
+
+- id: B6-01
+  family: valid_amount_shapes
+  title: Every amount shape a real client actually sends
+  narrative: >
+    An int, a digit string, and the per-action cap exactly. All three are
+    readable as whole paise and must pass untouched.
+  calls:
+    - {op: create_refund, args: {amount: 8500, customer_id: cust_demo_001}, expect: allow}
+    - {op: create_refund, args: {amount: "9200", customer_id: cust_demo_002}, expect: allow}
+    - {op: create_refund, args: {amount: 50000, customer_id: cust_demo_003}, expect: allow}
+
+- id: B6-02
+  family: valid_amount_shapes
+  title: Operations that carry no amount at all
+  narrative: >
+    A read has no amount field. If "absent" were treated the same as
+    "unreadable", AMT-001 would deny every fetch in the system -- which is
+    the exact shape of the deny-all baseline this corpus exists to rule out.
+  calls:
+    - {op: fetch_catalog, args: {}, expect: allow}
+    - {op: fetch_settlement, args: {settlement_id: setl_X}, expect: allow}
+    - {op: cancel_payment_link, args: {payment_link_id: plink_X}, expect: allow}
+    - {op: update_payment_notes, args: {payment_id: pay_X, notes: {tag: ok}}, expect: allow}
+
+- id: B6-03
+  family: valid_amount_shapes
+  title: Zero is a readable amount, not a missing one
+  narrative: A zero-rupee action is legal and boring. It must not trip AMT-001.
+  calls:
+    - {op: create_order, args: {amount: 0, receipt: gk_zero}, expect: allow}
+
+# ---- B7: a narrow grant must still permit what it actually granted -------
+
+- id: B7-01
+  family: narrow_grant
+  title: Small payments inside a deliberately tight capability
+  narrative: >
+    The grant caps a single payment at Rs 100 and the window at Rs 250. Two
+    Rs 90 refunds sit inside both. A grant check that denied these would make
+    narrow capabilities useless and push every integrator to issue wide ones,
+    which is worse than having no grant caps at all.
+  calls:
+    - {op: create_refund, args: {amount: 9000, customer_id: cust_demo_001}, expect: allow, token: narrow}
+    - {op: create_refund, args: {amount: 9001, customer_id: cust_demo_002}, expect: allow, token: narrow}
+
+- id: B7-02
+  family: narrow_grant
+  title: A narrow grant does not restrict reads or reversible writes
+  narrative: >
+    max_action_paise is denominated in money moved. A Rs 5,000 payment link
+    moves none, so the grant's money ceiling has nothing to say about it.
+  calls:
+    - {op: fetch_catalog, args: {}, expect: allow, token: narrow}
+    - {op: create_order, args: {amount: 128000}, expect: allow, token: narrow}
+    - {op: create_payment_link, args: {amount: 128000, customer_id: cust_demo_001}, expect: allow, token: narrow}
+
+# ---- B4-03: a plausible ten minutes of real traffic ----------------------
+
+- id: B4-03
+  family: busy_but_legitimate
+  title: A realistic mixed session -- browse, quote, order, pay, refund one item
+  narrative: >
+    Nothing here is near any threshold individually. The point is the mix:
+    reads interleaved with writes and one refund, which is what a real
+    shopping session looks like and what the rate rules must survive.
+  calls:
+    - {op: fetch_catalog, args: {}, expect: allow}
+    - {op: create_order, args: {amount: 74000, receipt: gk_b403}, expect: allow}
+    - {op: create_payment_link, args: {amount: 74000, customer_id: cust_demo_003}, expect: allow}
+    - {op: fetch_payment_link, args: {payment_link_id: plink_X}, expect: allow}
+    - {op: capture_payment, args: {payment_id: pay_X, amount: 28000}, expect: allow}
+    - {op: create_refund, args: {amount: 13500, customer_id: cust_demo_003}, expect: allow}
+
+# ---- B8: counterweights for the two rules that had no coverage at all ----
+
+- id: B8-01
+  family: out_of_hours
+  title: A reversible write at 03:00 is fine
+  narrative: >
+    TIME-001 holds MONEY movement outside business hours. An agent creating a
+    payment link at three in the morning has moved nothing, and blocking it
+    would break every overnight batch for no safety gain.
+  calls:
+    - {op: create_payment_link, args: {amount: 128000, customer_id: cust_demo_001}, expect: allow, hour: 3}
+    - {op: fetch_all_payments, args: {count: 5}, expect: allow, hour: 3}
+
+- id: B8-02
+  family: out_of_hours
+  title: Business hours, both edges, with money moving
+  narrative: >
+    08:00 and 20:59 are inside the window and must stay inside it. An
+    off-by-one on either edge silently blocks a real customer at the busiest
+    end of the day.
+  calls:
+    - {op: create_refund, args: {amount: 5000, customer_id: cust_demo_001}, expect: allow, hour: 8}
+    - {op: create_refund, args: {amount: 5001, customer_id: cust_demo_002}, expect: allow, hour: 20}
+
+- id: B8-03
+  family: busy_but_legitimate
+  title: Exactly twenty reversible writes -- at VEL-004's limit, not over it
+  narrative: >
+    VEL-004 denies the twenty-first. Twenty is a legal, if busy, ten minutes,
+    and this is the boundary case that stops the rule quietly widening into
+    denying nineteen.
+  calls:
+    - {op: create_payment_link, args: {amount: 2000, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2001, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2002, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2003, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2004, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2005, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2006, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2007, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2008, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2009, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2010, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2011, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2012, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2013, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2014, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2015, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2016, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2017, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2018, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_payment_link, args: {amount: 2019, customer_id: cust_demo_002}, expect: allow}

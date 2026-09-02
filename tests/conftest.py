@@ -19,7 +19,11 @@ def gk():
                       signing_secret=SECRET)
 
 
-BUSINESS_HOURS_TS = datetime(2026, 9, 4, 14, 0, 0).timestamp()
+# A Friday afternoon in the PAST. It used to be 4 September 2026 -- a future
+# date, which made every window query trivially satisfied and hid ADR-012's
+# clock bug for the whole build. A fixture timestamp must be in the past, or
+# the suite quietly changes behaviour on a calendar date. See ADR-012.
+BUSINESS_HOURS_TS = datetime(2020, 6, 5, 14, 0, 0).timestamp()
 
 
 @pytest.fixture

@@ -60,8 +60,14 @@ class ChainCheck:
 class AuditLog:
     def __init__(self, path: Path | str = "gatekeeper.db"):
         self.path = str(path)
-        self._conn = sqlite3.connect(self.path, check_same_thread=False)
+        self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=30.0)
         self._conn.row_factory = sqlite3.Row
+        # WAL + a real busy timeout. The idempotency store opens a SECOND
+        # connection onto this same file, so two writers exist by construction;
+        # without these, concurrent requests raise "database is locked" from
+        # inside commit() -- after the backend call has already moved money.
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=30000")
         self._conn.executescript(SCHEMA)
         self._conn.commit()
 
@@ -117,14 +123,31 @@ class AuditLog:
     def rows(self) -> Iterator[sqlite3.Row]:
         yield from self._conn.execute("SELECT * FROM audit ORDER BY seq ASC")
 
-    def window_sum_paise(self, agent_id: str, seconds: int, *, now: float | None = None) -> int:
+    def window_sum_paise(
+        self,
+        agent_id: str,
+        seconds: int,
+        *,
+        effect: str | None = None,
+        now: float | None = None,
+    ) -> int:
+        """Value of executed actions in the window, optionally one effect class.
+
+        `effect` is not optional in spirit. ADR-006 scoped VEL-001's *trigger*
+        to irreversible_money and left this sum counting every executed row,
+        so a Rs 1,280 basket -- an order plus a payment link, zero rupees
+        moved -- put Rs 2,560 into a "money moved" total and denied the next
+        refund with an explanation that was simply untrue. Scoping the trigger
+        is not scoping the sum. See ADR-016.
+        """
         now = now if now is not None else time.time()
-        row = self._conn.execute(
-            "SELECT COALESCE(SUM(amount_paise),0) AS s FROM audit "
-            "WHERE agent_id=? AND executed=1 AND ts >= ?",
-            (agent_id, now - seconds),
-        ).fetchone()
-        return int(row["s"])
+        q = ("SELECT COALESCE(SUM(amount_paise),0) AS s FROM audit "
+             "WHERE agent_id=? AND executed=1 AND ts >= ?")
+        params: list[Any] = [agent_id, now - seconds]
+        if effect:
+            q += " AND effect=?"
+            params.append(effect)
+        return int(self._conn.execute(q, params).fetchone()["s"])
 
     def window_count(
         self,
@@ -153,11 +176,42 @@ class AuditLog:
             params.append(effect)
         return int(self._conn.execute(q, params).fetchone()["c"])
 
+    def pending_approvals(self) -> list[dict[str, Any]]:
+        """Held actions, read from the log rather than from memory.
+
+        The proxy also keeps an in-process list, but that dies with the
+        process, and an approval queue that forgets on restart is not a queue.
+        The audit log is the durable record, so the CLI reads it.
+        """
+        return [
+            {"seq": r["seq"], "ts": r["ts"], "agent_id": r["agent_id"], "op": r["op"],
+             "amount_paise": r["amount_paise"], "counterparty": r["counterparty"],
+             "rule_ids": r["rule_ids"], "explanation": r["explanation"]}
+            for r in self._conn.execute(
+                "SELECT * FROM audit WHERE verdict='require_approval' ORDER BY seq ASC")
+        ]
+
     def verify(self) -> ChainCheck:
+        """Walk the chain. Detects edits, reordering and gaps.
+
+        What it does NOT detect is truncation of the TAIL: lop off the last k
+        records and what remains is a perfectly valid chain of length n-k. No
+        self-contained log can detect that -- "the newest record is the newest
+        record" is unfalsifiable from inside the file. It needs an external
+        anchor (a remote append-only sink, or periodically publishing the head
+        hash somewhere the attacker does not control), which THREAT_MODEL.md
+        lists as a non-goal and the README states plainly. The seq check below
+        catches deletions from the middle, which is the case that used to be
+        caught only by luck.
+        """
         prev = GENESIS
         n = 0
         for r in self.rows():
             n += 1
+            if r["seq"] != n:
+                return ChainCheck(False, n, r["seq"],
+                                  f"sequence gap: expected seq {n}, found {r['seq']} "
+                                  "-- a record was deleted from the middle of the log")
             fields = {
                 "ts": r["ts"],
                 "agent_id": r["agent_id"],

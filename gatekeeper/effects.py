@@ -28,7 +28,7 @@ class EffectRegistry:
     @classmethod
     def load(cls, path: Path | str | None = None) -> "EffectRegistry":
         p = Path(path) if path else DEFAULT_PATH
-        raw = yaml.safe_load(p.read_text()) or {}
+        raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
         mapping: dict[str, Effect] = {}
         for effect_name, ops in (raw.get("operations") or {}).items():
             effect = Effect(effect_name)

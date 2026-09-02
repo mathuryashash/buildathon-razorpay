@@ -44,7 +44,9 @@ class BuyerAgent:
     # -- the shopping flow ------------------------------------------------
 
     def catalog(self) -> list[dict[str, Any]]:
-        return httpx.get(f"{self.merchant_url}/catalog", timeout=10.0).json()
+        r = httpx.get(f"{self.merchant_url}/catalog", timeout=10.0)
+        r.raise_for_status()
+        return r.json()
 
     def resolve(self, intent: str, catalog: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Turn 'two kilos of atta and some honey' into SKUs.
@@ -95,7 +97,15 @@ class BuyerAgent:
         if not cart:
             return {"ok": False, "reason": "no catalogue match for that request"}
 
-        quote = httpx.post(f"{self.merchant_url}/quote", json=cart, timeout=10.0).json()
+        # The merchant rejects an unknown SKU with 400 and an out-of-stock
+        # quantity with 409. Reading ["total_paise"] off either turned a clear
+        # merchant error into a KeyError halfway through checkout.
+        q = httpx.post(f"{self.merchant_url}/quote", json=cart, timeout=10.0)
+        if q.status_code != 200:
+            return {"ok": False, "stage": "quote", "cart": cart,
+                    "reason": f"merchant refused to price this cart "
+                              f"({q.status_code}): {q.text[:200]}"}
+        quote = q.json()
 
         order = self._act("create_order", {"amount": quote["total_paise"],
                                            "receipt": f"gk_{customer_id}"})

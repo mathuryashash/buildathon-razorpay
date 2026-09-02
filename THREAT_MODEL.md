@@ -78,8 +78,10 @@ The agent calls an operation nobody classified, or one outside its grant. This
 is where fail-closed earns its keep: adding a tool to the MCP server must not
 silently widen what an agent can do.
 → `SCOPE-001` (undeclared effect ⇒ deny), `SCOPE-002` (payouts need a human),
-  plus the scope check in `proxy.py` step 2, before policy runs
-→ Attack family `scope_escalation`, scenarios F3-01…F3-04
+  the scope check in `proxy.py` step 2 before policy runs, and the grant's own
+  `max_action_paise` / `max_window_paise` ceilings enforced at step 5
+  (`GRANT-001`) — a capability may only ever be *narrower* than merchant policy
+→ Attack family `scope_escalation`, scenarios F3-01…F3-04, F7-01…F7-02
 
 ### T4 — Exfiltration to an unintended destination
 A legitimate-looking refund pointed at an account the merchant has never seen.
@@ -110,6 +112,20 @@ charged twice.
 Someone edits the audit trail to hide an action.
 → Hash-chained records; `gatekeeper verify` reports the first broken sequence
 → Tests in `tests/test_audit_chain.py`
+
+### T8 — The amount field itself as the bypass
+The value the rules reason about is attacker-supplied and arrives over JSON,
+where a number may be an int, a float, a string, or a nested object. A parser
+that quietly maps everything it does not recognise to `0` turns every
+amount-based rule off for exactly the requests that most deserve them.
+→ `AMT-001` (an amount that cannot be read as whole non-negative paise is
+  denied, never assumed to be zero)
+→ Attack family `cap_evasion`, scenarios F6-01…F6-04; benign counterweight
+  `valid_amount_shapes`, B6-01…B6-03
+> This threat was not foreseen. It was found by probing the parser during the
+> review pass, after `{"amount": 250000.0}` executed a ₹2,500 refund through a
+> ₹500 cap. It is in the model now because the fix is; pretending it was
+> designed for would be the dishonest version. See `docs/DECISIONS.md` ADR-013.
 
 ---
 

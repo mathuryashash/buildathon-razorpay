@@ -2,6 +2,8 @@
 from gatekeeper.effects import EffectRegistry
 from gatekeeper.models import ActionRequest
 
+from .conftest import BUSINESS_HOURS_TS
+
 
 def test_unknown_operation_is_undeclared():
     reg = EffectRegistry.load()
@@ -10,7 +12,8 @@ def test_unknown_operation_is_undeclared():
 
 
 def test_undeclared_operation_is_denied_end_to_end(gk, token):
-    res = gk.handle(token, ActionRequest(op="never_declared", args={"amount": 1}))
+    res = gk.handle(token, ActionRequest(op="never_declared", args={"amount": 1}),
+                    now=BUSINESS_HOURS_TS)
     assert res.decision.verdict.value == "deny"
     assert not res.executed
     assert "no declared effect class" in res.decision.explanation
@@ -19,7 +22,8 @@ def test_undeclared_operation_is_denied_end_to_end(gk, token):
 def test_operation_names_are_matched_exactly_not_fuzzily(gk, token):
     # 'Create_Refund' must NOT resolve to 'create_refund'. Case-insensitive
     # lookup would let an attacker slip past the registry.
-    res = gk.handle(token, ActionRequest(op="Create_Refund", args={"amount": 100}))
+    res = gk.handle(token, ActionRequest(op="Create_Refund", args={"amount": 100}),
+                    now=BUSINESS_HOURS_TS)
     assert res.decision.verdict.value == "deny"
 
 

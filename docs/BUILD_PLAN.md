@@ -7,17 +7,37 @@ remains is verification, honesty, and packaging.
 
 ## Already done
 
-- [x] Threat model written **before** feature code, 7 threats, explicit non-goals
+- [x] Threat model written **before** feature code, 8 threats, explicit non-goals
 - [x] Effect registry with deny-by-default on undeclared operations
-- [x] Policy engine — 11 rules, 11 typed conditions, deny beats allow
+- [x] Policy engine — 14 rules, 13 typed conditions, deny beats allow
 - [x] Capability tokens; agent holds no credential; test enforces it
+- [x] The grant's own ceilings enforced, not just carried (ADR-014)
 - [x] Hash-chained audit log + independent `verify` CLI
-- [x] Content-addressed idempotency, checked before execution
+- [x] Content-addressed idempotency, checked before execution, under a lock
 - [x] Mock backend (Razorpay-shaped) and real test-mode backend
 - [x] Reference merchant + buyer agent, checkout end to end
-- [x] 31 eval scenarios / 67 calls across two corpora + deny-all baseline
-- [x] 34 unit tests, CI, Makefile, ADRs, docs
-- [x] Two real policy bugs found by the eval and written up
+- [x] 52 eval scenarios / 145 calls across two corpora + deny-all baseline
+- [x] 73 unit tests, CI, Makefile, 20 ADRs, docs
+- [x] Ten real bugs found and written up — two by the eval during the build,
+      three by a self-review, five by an adversarial review pass
+
+## What the review pass changed, and why it is in this file
+
+The Thursday plan said "add 1–2 rules of your own" and "widen the benign
+corpus". Both happened. What was not planned, and mattered more, was pointing
+an adversarial reviewer at the finished project with a single instruction:
+break the enforcement.
+
+It found five bugs, three of them in claims the README already made in the
+present tense — a retry storm that double-charged under concurrency, a
+destination allowlist that an agent could switch off by deleting a field, and
+a velocity fix that had only ever been half applied. None of them were
+findable by adding another rule. All of them were findable in an hour by
+someone whose job was to disbelieve the documentation.
+
+If there is one process lesson from this build, it is that: **the highest-yield
+hour was not spent writing rules or scenarios. It was spent trying to break
+the thing that already passed its own tests.**
 
 ## Thursday 3 September
 
@@ -27,7 +47,7 @@ remains is verification, honesty, and packaging.
 | AM | `.env` with your own rotated test key + fresh signing secret | `make demo-live` creates a real test-mode payment link |
 | PM | Read `THREAT_MODEL.md` and every rule until you can defend each one **unprompted** | You can say what breaks without each rule |
 | PM | Add 1–2 rules of your own following `docs/HOW_TO_WORK.md` | Threat + rule + attack + benign + test, all five |
-| EVE | Widen the benign corpus — it finds the bugs that matter | 40+ benign calls |
+| EVE | Widen the benign corpus — it finds the bugs that matter | 77 benign calls |
 
 ## Friday 4 September
 
