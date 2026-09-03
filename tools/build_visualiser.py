@@ -67,9 +67,14 @@ STAGES = [
                "therefore cannot quietly widen what an agent can do."},
     {"n": 4, "name": "Evaluate policy",
      "what": "Caps, velocity, destination, hours.",
-     "detail": "14 rules of YAML over a fixed vocabulary of typed conditions. Every "
-               "rule cites a threat id. A single deny beats any number of allows, "
-               "and a request no rule covers is denied rather than assumed safe."},
+     # {rules} is filled in from the policy file at generation time. It said
+     # "14" for as long as there have been 15, in the one hand-typed number
+     # inside a generator whose whole reason for existing is that hand-typed
+     # numbers drift. len() was eight lines away the entire time.
+     "detail": "{rules} rules of YAML over a fixed vocabulary of typed conditions. "
+               "Every rule cites a threat id. A single deny beats any number of "
+               "allows, and a request no rule covers is denied rather than "
+               "assumed safe."},
     {"n": 5, "name": "Apply the grant’s own ceilings",
      "what": "A capability may only ever narrow policy further.",
      "detail": "The token carries its own per-action and per-window limits. This "
@@ -210,6 +215,7 @@ def run() -> dict:
 
     # ---- the rules, so the page can explain whichever one fired ---------
     raw = yaml.safe_load((ROOT / "policies/default.yaml").read_text(encoding="utf-8"))
+    n_policy_rules = len(raw["rules"])   # before the two synthetic entries below
     rules = {r["id"]: {"threat": str(r.get("threat", "")),
                        "description": " ".join(str(r.get("description", "")).split()),
                        "action": r["action"]}
@@ -226,9 +232,15 @@ def run() -> dict:
     # ---- the measured numbers, straight out of the eval -----------------
     ev = json.loads((ROOT / "eval_results.json").read_text(encoding="utf-8"))
 
+    # len(rules), not len(policy rules): the map below is augmented with
+    # SCOPE-000 and GRANT-001 so the page can explain the proxy's own checks,
+    # and counting those as policy rules overstates the file by two.
+    stages = [dict(st, detail=st["detail"].format(rules=n_policy_rules))
+              for st in STAGES]
+
     return {
         "generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "stages": STAGES,
+        "stages": stages,
         "rules": rules,
         "ungoverned": ungoverned,
         "governed": governed,
@@ -243,8 +255,13 @@ def run() -> dict:
             "blocking_calls": ev["attack"]["blocking_calls"],
             "attack_total": ev["attack"]["total"],
             "false_block_rate": ev["benign"]["false_block_rate"],
+            "benign_wrongly_blocked": ev["benign"]["total"] - ev["benign"]["correct"],
             "benign_total": ev["benign"]["total"],
-            "holdout": ev.get("holdout"),
+            # Score only. The per-call miss detail is in the README prose;
+            # nothing on this page renders it, and baking the sealed set's
+            # internals into a shipped HTML file serves no one.
+            "holdout": ({k: v for k, v in ev["holdout"].items() if k != "misses"}
+                        if ev.get("holdout") else None),
             "p50": ev["latency_ms"]["p50"],
             "p95": ev["latency_ms"]["p95"],
             "baseline": ev["baseline_deny_all"],

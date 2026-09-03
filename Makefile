@@ -9,6 +9,7 @@ help:
 	@echo "make eval          run the red-team evaluation -> the README numbers"
 	@echo "make eval-holdout  ALSO run the sealed hold-out set. ONCE, after freeze."
 	@echo "make demo          the pitch demo: same agent, with and without the proxy"
+	@echo "                   add QUIET=1 for verdicts only, without the reasoning"
 	@echo "make demo-live     the same demo, hitting real Razorpay TEST MODE"
 	@echo "make visualiser    regenerate visualiser.html from a live run"
 	@echo "make serve         run the proxy on :8080"
@@ -30,7 +31,7 @@ eval-holdout:
 	python evals/run_eval.py --holdout --json eval_results.json
 
 demo:
-	python demo.py
+	python demo.py $(if $(QUIET),--quiet,)
 
 demo-live:
 	python demo.py --live

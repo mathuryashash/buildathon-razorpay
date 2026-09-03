@@ -262,17 +262,26 @@ def run_governed(plan: list[Act], backend_name: str = "mock", *, verbose: bool =
             for line in textwrap.wrap("agent: " + a.thought, width=70):
                 print(f"      | {line}")
 
+        # The README transcript annotated these; the program did not print
+        # them. Cheaper to print them than to fix the transcript, and they are
+        # the only way to tell from the terminal why stages 1 and 5 fired.
+        note = ""
+        if a.token != "agent":
+            note = f"   [{a.token} token]" if a.token == "forged" else "   [narrow grant]"
+        elif a.hour is not None:
+            note = f"   [{a.hour:02d}:30]"
+
         if v == "allow" and res.executed:
             moved += amt if a.op in MOVES_MONEY else 0
-            print(f"  ALLOW     {a.op:<26} Rs {amt/100:>10,.2f}")
+            print(f"  ALLOW     {a.op:<26} Rs {amt/100:>10,.2f}{note}")
         elif res.replayed:
-            print(f"  REPLAY    {a.op:<26} Rs {amt/100:>10,.2f}")
+            print(f"  REPLAY    {a.op:<26} Rs {amt/100:>10,.2f}{note}")
             print("            -> Identical request already executed. Returned the "
                   "original result; no new money moved.")
         else:
             blocked += 1
             tag = "BLOCK" if v == "deny" else "HOLD "
-            print(f"  {tag}     {a.op:<26} Rs {amt/100:>10,.2f}")
+            print(f"  {tag}     {a.op:<26} Rs {amt/100:>10,.2f}{note}")
             # Wrap rather than truncate. The explanation IS the product; a
             # reason cut off mid-word at column 88 was the demo undercutting
             # the exact claim it exists to make.

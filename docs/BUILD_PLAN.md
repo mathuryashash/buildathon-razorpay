@@ -9,7 +9,7 @@ remains is verification, honesty, and packaging.
 
 - [x] Threat model written **before** feature code, 8 threats, explicit non-goals
 - [x] Effect registry with deny-by-default on undeclared operations
-- [x] Policy engine — 14 rules, 13 typed conditions, deny beats allow
+- [x] Policy engine — 15 rules, 13 typed conditions, deny beats allow
 - [x] Capability tokens; agent holds no credential; test enforces it
 - [x] The grant's own ceilings enforced, not just carried (ADR-014)
 - [x] Hash-chained audit log + independent `verify` CLI

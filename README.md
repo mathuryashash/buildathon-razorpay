@@ -148,7 +148,7 @@ prompt.
 | Verdict match, whole attack corpus | 68 / 68 -- 100% |
 | **False-block rate** (benign corpus) | **0 / 77 -- 0%** |
 | **Held-out set** (sealed, written blind, run once) | **15 / 21 -- 71.4%** |
-| Proxy overhead, end to end | p50 **4.4 ms**, p95 **5.4 ms** |
+| Proxy overhead, end to end | **single-digit ms** — `make eval` prints the current run's p50/p95 |
 | Deny-everything baseline | block rate **100%**, false-block rate **100%** |
 
 **Two numbers for the attack corpus, because they are not the same number.**
@@ -165,6 +165,12 @@ perfect score. Nobody read it for a week.
 
 The baseline row is why a block rate alone is not a result, and the harness
 prints it every run so the headline cannot be quoted without its counterweight.
+
+No specific p50 is quoted here on purpose. It is machine- and load-dependent,
+this README carried 4.4 ms while the committed results file said 2.51 ms and a
+fresh run said 1.39 ms, and three artifacts disagreeing about one metric is
+worse than not printing it. The harness prints the run's own figure; the
+visualiser shows the figure from the run it was built from.
 
 The overhead figure is the **whole** `handle()` call on a dev laptop: token
 verification, scope, effect lookup, every rule, the grant ceilings, the
@@ -299,7 +305,7 @@ stands on each clause. Two rows are honest partials.
 |---|---|---|
 | An agent | `agent/buyer.py` — resolves a shopper's sentence to SKUs, never to prices | ✅ |
 | Makes a merchant transactable | `merchant/app.py` prices the cart; the agent opens an order, issues a link, and captures the payment | ✅ |
-| **End to end** | The full path runs live: agent → proxy → merchant, verified over HTTP, and Act I of `make demo` closes the loop through capture | ✅ |
+| **End to end** | `tests/test_end_to_end.py` drives the real `BuyerAgent` against the real proxy and the real merchant — shopper sentence → SKUs → merchant quote → order → payment link, with the audit trail asserted. Act I of `make demo` closes the loop through capture | ✅ |
 | On Razorpay test-mode APIs | `RazorpayBackend` is real and refuses any key that is not `rzp_test_`. The eval runs on the shape-compatible mock so it is deterministic and offline | ⚠️ **partial** — see below |
 | Grows revenue | Not attempted. This is the *other* branch of the "or", and claiming both would be the weaker answer | — by choice |
 
@@ -308,7 +314,7 @@ stands on each clause. Two rows are honest partials.
 
 | Clause | Where | Status |
 |---|---|---|
-| **Every** money action | Nothing reaches a backend except through `Gatekeeper.handle`. Only two `.call(` sites exist in the repo, and one is the deliberately ungoverned Run 1 | ✅ |
+| **Every** money action | No *governed* path reaches a backend except through `Gatekeeper.handle`. Three `.call(` sites exist: the proxy, and two in the demo harness that deliberately bypass it to produce Run 1 | ✅ |
 | Explainable | Every verdict carries a sentence written for a merchant, not a log line. `Blocked: ₹2,500.00 is over the ₹500.00 limit for a single agent-initiated payment` — not `DENY rule=CAP-001` | ✅ |
 | Bounded | Per-action caps, rolling-value and rolling-count velocity, per-counterparty limits, destination allowlist, business hours, **and** the grant's own ceilings on top | ✅ |
 | Gated | Deny-by-default at three separate points: an undeclared operation, an operation outside the grant, and a request no rule covers are all refused rather than assumed safe | ✅ |
@@ -580,7 +586,7 @@ pip install -r requirements.txt
 cp .env.example .env
 python -c "import secrets; print(secrets.token_urlsafe(32))"  # → GATEKEEPER_SIGNING_SECRET
 
-make test     # 73 tests, ~4s, no network
+make test     # 78 tests, ~5s, no network
 make eval     # reproduces every number in the table above
 make demo     # the two-run comparison
 ```
@@ -621,9 +627,10 @@ has no business holding a production credential.
 | `gatekeeper/audit.py` | Hash-chained log + `verify`. |
 | `gatekeeper/tokens.py` | Capability tokens. The trust boundary lives here. |
 | `policies/effects.yaml` | Operation → effect class. Absent means denied. |
-| `policies/default.yaml` | 14 rules, each citing a threat. |
+| `policies/default.yaml` | 15 rules, each citing a threat. |
 | `evals/` | 52 scenarios / 145 calls across two corpora + the harness. |
 | `visualiser.html` | The run above, step-through-able in a browser. Data baked in from a live run by `tools/build_visualiser.py`. |
+| `tests/test_end_to_end.py` | The agent → proxy → merchant path, in process. The Track 01 "end to end" clause, checked rather than asserted. |
 | `docs/DECISIONS.md` | 20 ADRs, including the ten "what broke" records. |
 | `docs/DO_NOT_BUILD.md` | Anti-scope. What not to build and why. |
 | `docs/HOW_TO_WORK.md` | Setup, the change loop, how to add a rule safely. |
