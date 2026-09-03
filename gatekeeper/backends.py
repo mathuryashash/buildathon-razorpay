@@ -64,6 +64,25 @@ class MockBackend:
         raise BackendError(f"MockBackend has no implementation for {op!r}")
 
 
+# Operations the proxy knows about that a plain test-mode key genuinely
+# cannot perform. Naming them individually beats one flat "not implemented",
+# because the reason differs and the reason is what a reviewer wants.
+#
+# None of these is reachable in the demo: every one is denied or held by
+# policy before the backend is consulted. They are here so that raising a cap
+# produces an honest error instead of a confusing 404.
+NOT_IN_TEST_MODE = {
+    "create_payout": "payouts are a RazorpayX product on a separate API host, "
+                     "not part of a standard test-mode key",
+    "create_transfer": "Route transfers need Route enabled on the account",
+    "create_instant_settlement": "instant settlements need the feature enabled, "
+                                 "and are deliberately absent from "
+                                 "policies/effects.yaml so they fail closed",
+    "fetch_catalog": "not a Razorpay operation at all -- the merchant serves its "
+                     "own catalogue, and the agent reads it directly",
+}
+
+
 class RazorpayBackend:
     """Real Razorpay test mode.
 
@@ -123,11 +142,31 @@ class RazorpayBackend:
             if op == "fetch_all_payments":
                 return {"items": c.payment.all({"count": int(args.get("count", 10))}).get("items", [])}
             if op == "capture_payment":
-                return c.payment.capture(args["payment_id"], int(args["amount"]))
+                # currency is required by the Payments API on capture; leaving
+                # it off returns BAD_REQUEST_ERROR rather than capturing.
+                return c.payment.capture(args["payment_id"], int(args["amount"]),
+                                         {"currency": "INR"})
             if op == "create_refund":
-                return c.payment.refund(args["payment_id"], {"amount": int(args["amount"])})
+                return c.payment.refund(args["payment_id"], {
+                    "amount": int(args["amount"]),
+                    "speed": "normal",
+                    "notes": {"issued_by": "gatekeeper-demo"},
+                })
+            if op == "fetch_refund":
+                return c.payment.fetch_refund_id(args["payment_id"], args["refund_id"])
+            if op == "fetch_settlement":
+                # Not on the SDK surface; the raw GET is the documented route.
+                return c.get(f"{c.base_url}/settlements", {}, {})
         except Exception as e:  # razorpay raises a family of errors
             raise BackendError(f"razorpay call {op} failed: {e}") from e
+
+        if op in NOT_IN_TEST_MODE:
+            raise BackendError(
+                f"{op!r} cannot run against Razorpay test mode: {NOT_IN_TEST_MODE[op]}. "
+                "The proxy still evaluates it -- policy runs before the backend is "
+                "ever reached -- so the decision and the audit record are real even "
+                "though the call is not."
+            )
         raise BackendError(
             f"{op!r} is not implemented against live Razorpay test mode. "
             "Run it against --backend mock, or implement it here."

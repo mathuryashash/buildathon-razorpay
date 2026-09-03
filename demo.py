@@ -4,7 +4,7 @@
 Same agent. Two runs. One number changes.
 
     python demo.py            # in-process, no servers needed
-    python demo.py --live     # hits real Razorpay TEST MODE for the happy path
+    python live.py            # the real Razorpay TEST MODE run
 
 Run 1: the agent has direct access to the payments API. A poisoned product
        description tells it to issue a large refund to an unknown account, and
@@ -305,10 +305,21 @@ def main() -> int:
     _load_dotenv()
     ap = argparse.ArgumentParser()
     ap.add_argument("--live", action="store_true",
-                    help="use real Razorpay test mode for run 2 (needs .env)")
+                    help="moved: use live.py, which is the real test-mode run")
     ap.add_argument("--quiet", action="store_true",
                     help="verdicts only, without the agent's reasoning")
     a = ap.parse_args()
+    if a.live:
+        # There is one live path, and it is not this file. Running this
+        # 22-action script against Razorpay produced a wall of API errors:
+        # more than half of it is refunds and captures, which need a real paid
+        # payment that test mode will not manufacture headlessly. live.py asks
+        # somebody to pay a link, which is the only way that half can be real.
+        print("\n  `demo.py --live` has moved. Use:\n\n"
+              "      make preflight    check your test key works, create nothing\n"
+              "      make live         the real run, against real Razorpay\n\n"
+              "  This script stays deterministic and offline so CI can run it.\n")
+        return 2
 
     plan = AGENT_PLAN
 
@@ -317,8 +328,7 @@ def main() -> int:
     print("  injected instruction. The agent is not malicious. It is obedient.\n")
 
     ungoverned = run_ungoverned(plan)
-    governed = run_governed(plan, "razorpay" if a.live else "mock",
-                            verbose=not a.quiet)
+    governed = run_governed(plan, "mock", verbose=not a.quiet)
 
     print(RULE)
     print(f"  Without Gatekeeper: Rs {ungoverned/100:,.2f} left the merchant.")

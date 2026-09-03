@@ -1,7 +1,7 @@
 # Every number in the README is produced by `make eval`. If you change a rule
 # and do not re-run this, the README is lying.
 
-.PHONY: help install test eval eval-holdout demo demo-live visualiser serve merchant verify lint clean
+.PHONY: help install test eval eval-holdout demo preflight live visualiser serve merchant verify lint clean
 
 help:
 	@echo "make install       install dependencies"
@@ -10,7 +10,8 @@ help:
 	@echo "make eval-holdout  ALSO run the sealed hold-out set. ONCE, after freeze."
 	@echo "make demo          the pitch demo: same agent, with and without the proxy"
 	@echo "                   add QUIET=1 for verdicts only, without the reasoning"
-	@echo "make demo-live     the same demo, hitting real Razorpay TEST MODE"
+	@echo "make preflight     check your Razorpay test key works, create nothing"
+	@echo "make live          the live run against real Razorpay TEST MODE"
 	@echo "make visualiser    regenerate visualiser.html from a live run"
 	@echo "make serve         run the proxy on :8080"
 	@echo "make merchant      run the reference merchant on :8081"
@@ -33,8 +34,11 @@ eval-holdout:
 demo:
 	python demo.py $(if $(QUIET),--quiet,)
 
-demo-live:
-	python demo.py --live
+preflight:
+	python live.py --preflight
+
+live:
+	python live.py
 
 # visualiser.html ships with real trace data baked in. This re-bakes it.
 #

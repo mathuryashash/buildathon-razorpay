@@ -306,7 +306,7 @@ stands on each clause. Two rows are honest partials.
 | An agent | `agent/buyer.py` — resolves a shopper's sentence to SKUs, never to prices | ✅ |
 | Makes a merchant transactable | `merchant/app.py` prices the cart; the agent opens an order, issues a link, and captures the payment | ✅ |
 | **End to end** | `tests/test_end_to_end.py` drives the real `BuyerAgent` against the real proxy and the real merchant — shopper sentence → SKUs → merchant quote → order → payment link, with the audit trail asserted. Act I of `make demo` closes the loop through capture | ✅ |
-| On Razorpay test-mode APIs | `RazorpayBackend` is real and refuses any key that is not `rzp_test_`. The eval runs on the shape-compatible mock so it is deterministic and offline | ⚠️ **partial** — see below |
+| On Razorpay test-mode APIs | `make live` runs the purchase and the injected attack sequence against the real API — real order, real payment link you actually pay, real refund, real object ids in the Dashboard. `RazorpayBackend` refuses any key that is not `rzp_test_`. The eval stays on the shape-compatible mock so it is deterministic and offline | ✅ live, ⚠️ the *numbers* are still the mock's |
 | Grows revenue | Not attempted. This is the *other* branch of the "or", and claiming both would be the weaker answer | — by choice |
 
 > **The bar —** *"Every money action explainable, bounded and gated. Show the
@@ -321,13 +321,31 @@ stands on each clause. Two rows are honest partials.
 | Show the audit trail | Hash-chained, denials included, `python -m gatekeeper log` / `verify` / `approvals`, `GET /v1/audit`, and it assembles live in `visualiser.html` | ✅ |
 | **One failure handled gracefully** | Three, actually: `HOLD` queues a payout for a human instead of discarding it; a retried request replays the original result instead of double-charging; and an internal error denies and audits rather than returning a 500 | ✅ |
 
-**Where the ⚠️ is, plainly.** Every number in this README comes from the mock
-backend. That is a deliberate choice — the eval has to be deterministic,
-offline and re-runnable, and Razorpay test mode cannot generate batches
-anyway — but it does mean the headline results have never touched Razorpay's
-servers. `make demo-live` exercises the real test-mode API for the paths that
-work headlessly (Orders, Payment Links), and running it once before judging
-is the single cheapest thing that would move this row to ✅.
+**Where the ⚠️ still is, plainly.** `make live` is real, but every *number*
+in this README — block rate, false-block rate, the held-out 71.4% — comes from
+the mock backend, and always will. That is deliberate: an eval that needs the
+network is an eval that cannot run in CI, cannot be re-run 200 times, and
+gives a different answer on a bad wifi day. Razorpay test mode also cannot
+generate batches at all. So the split is: **the architecture is proven live,
+the measurements are proven offline.** Saying that plainly is better than
+either pretending the numbers are live or pretending the live path exists
+when it does not.
+
+**What `make live` actually does, and why it needs you for thirty seconds.**
+Test mode will not manufacture a paid payment, and a refund needs one behind
+it. So the run creates a real order and a real payment link, prints the
+`rzp.io` URL, and waits while you pay it with a test card
+(`4111 1111 1111 1111`, any future expiry, any CVV). Once Razorpay confirms
+the payment, the injected attack sequence runs **against a real, paid,
+captured payment** — so every refund it attempts is one that *would* have
+succeeded had the proxy allowed it. Blocking a refund that could not have
+worked anyway proves nothing, which is the whole reason for the interactive
+step.
+
+```bash
+make preflight   # checks the key and the secret. Creates nothing.
+make live        # the real run
+```
 
 **On "why now".** The brief cites NPCI's UAP and the protocol race — ACP, AP2,
 x402. That framing is the argument for this project rather than against it:
@@ -375,8 +393,8 @@ shared velocity state named under Future work; a mutex is not that.
 batches — subscription failures are a Dashboard button, Smart Collect test
 payments are a Dashboard action, and there is no dispute-creation API. The mock
 mirrors Razorpay's response shapes so everything above the backend line is
-identical; `make demo-live` exercises the real API for the paths that work
-headlessly (Orders, Payment Links).
+identical; `make live` exercises the real API end to end, including a refund
+against a payment you actually paid.
 
 **Ten bugs shipped. Two were caught by the eval, three by a self-review, and
 five more by an adversarial review pass whose only instruction was to break
@@ -603,7 +621,8 @@ python -m gatekeeper verify    --db gatekeeper-demo.db   # chain intact?
 Live Razorpay test mode (needs `rzp_test_` keys in `.env`):
 
 ```bash
-make demo-live
+make preflight                   # is the key good? creates nothing
+make live                        # the real run: real order, link, refund
 make serve BACKEND=razorpay     # proxy on :8080
 make merchant                    # reference merchant on :8081
 python -m gatekeeper log         # read the audit trail
@@ -630,6 +649,7 @@ has no business holding a production credential.
 | `policies/default.yaml` | 15 rules, each citing a threat. |
 | `evals/` | 52 scenarios / 145 calls across two corpora + the harness. |
 | `visualiser.html` | The run above, step-through-able in a browser. Data baked in from a live run by `tools/build_visualiser.py`. |
+| `live.py` | The same argument against the real Razorpay test-mode API. `make preflight` first. |
 | `tests/test_end_to_end.py` | The agent → proxy → merchant path, in process. The Track 01 "end to end" clause, checked rather than asserted. |
 | `docs/DECISIONS.md` | 20 ADRs, including the ten "what broke" records. |
 | `docs/DO_NOT_BUILD.md` | Anti-scope. What not to build and why. |

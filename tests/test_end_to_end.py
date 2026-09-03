@@ -12,6 +12,8 @@ runs in CI, offline, in milliseconds, and cannot flake on a port collision.
 """
 from __future__ import annotations
 
+import pathlib
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -127,3 +129,57 @@ def test_an_unpriceable_cart_is_a_clean_refusal_not_a_crash(wired, monkeypatch):
     assert out["ok"] is False
     assert out["stage"] == "quote"
     assert "409" in out["reason"]
+
+
+# ---- the live path cannot silently rot -----------------------------------
+
+
+def test_every_op_the_demo_allows_is_answerable_by_the_live_backend():
+    """A drift guard on `make live`.
+
+    The mock answers anything the policy lets through, so the live path can
+    fall behind the demo plan without a single test noticing -- and the only
+    way to find out would be running `make live` in front of a judge and
+    watching it throw. Every operation the proxy ALLOWS must therefore be
+    either implemented against the real API, or listed in NOT_IN_TEST_MODE
+    with a reason a person can read.
+    """
+    import inspect
+
+    from demo import AGENT_PLAN
+    from gatekeeper.backends import NOT_IN_TEST_MODE, RazorpayBackend
+    from gatekeeper.effects import EffectRegistry
+    from gatekeeper.policy import PolicyEngine
+
+    source = inspect.getsource(RazorpayBackend.call)
+    engine, effects = PolicyEngine.load(), EffectRegistry.load()
+
+    unanswerable = []
+    for op in sorted({a.op for a in AGENT_PLAN}):
+        if effects.classify(op) is None:
+            continue                       # undeclared: denied at stage 3
+        implemented = f'op == "{op}"' in source
+        if not implemented and op not in NOT_IN_TEST_MODE:
+            unanswerable.append(op)
+
+    assert not unanswerable, (
+        f"the demo can allow {unanswerable}, and `make live` would answer with "
+        f"'not implemented'. Implement it in RazorpayBackend.call, or add it "
+        f"to NOT_IN_TEST_MODE with the reason it cannot work."
+    )
+
+
+def test_the_live_runner_only_asks_for_operations_it_has_scoped():
+    """live.py mints one capability; a typo in that list is a stage-2 denial
+    in front of an audience, and nothing else would catch it."""
+    import re
+
+    import live
+
+    src = pathlib.Path(live.__file__).read_text(encoding="utf-8")
+    scopes = set(re.findall(r'"(\w+)"', src[src.index("scopes = ["):src.index("]", src.index("scopes = ["))]))
+    requested = set(re.findall(r'_act\(gk, token, "(\w+)"', src))
+    requested |= set(re.findall(r'backend\.call\("(\w+)"', src))
+
+    missing = requested - scopes - {"fetch_payment_link"}   # polled off-proxy
+    assert not missing, f"live.py requests {missing} but never grants it"

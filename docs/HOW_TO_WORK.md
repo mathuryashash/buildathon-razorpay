@@ -18,6 +18,8 @@ cp .env.example .env
 python -c "import secrets; print(secrets.token_urlsafe(32))"   # paste into GATEKEEPER_SIGNING_SECRET
 # paste your rzp_test_ key id and secret into .env as well
 
+make preflight   # confirms the key works before anything is created with it
+
 make test        # 73 tests, ~0.5s, no network
 make eval        # the red-team numbers
 make demo        # the pitch demo
@@ -120,7 +122,7 @@ cannot scroll back.
 ## Working with the live Razorpay backend
 
 ```bash
-make demo-live          # or: python -m gatekeeper serve --backend razorpay
+make live               # or: python -m gatekeeper serve --backend razorpay
 ```
 
 Notes from building against test mode:

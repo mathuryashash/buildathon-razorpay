@@ -44,7 +44,7 @@ the thing that already passed its own tests.**
 | | Task | Done means |
 |---|---|---|
 | AM | Clone, `make install`, `make test`, `make eval`, `make demo` | All green on your machine |
-| AM | `.env` with your own rotated test key + fresh signing secret | `make demo-live` creates a real test-mode payment link |
+| AM | `.env` with your own rotated test key + fresh signing secret | `make preflight` passes and `make live` creates a real test-mode payment link |
 | PM | Read `THREAT_MODEL.md` and every rule until you can defend each one **unprompted** | You can say what breaks without each rule |
 | PM | Add 1–2 rules of your own following `docs/HOW_TO_WORK.md` | Threat + rule + attack + benign + test, all five |
 | EVE | Widen the benign corpus — it finds the bugs that matter | 77 benign calls |
@@ -70,7 +70,7 @@ Buffer only. If you are building on Saturday, something went wrong on Friday.
 ## If you fall behind — cut in this order
 
 1. Extra rules of your own (11 is already a defensible set)
-2. `make demo-live` (the mock demonstrates the same architecture)
+2. `make live` (the mock demonstrates the same architecture)
 3. The reference merchant's polish
 4. Widening the benign corpus past 40 calls
 
