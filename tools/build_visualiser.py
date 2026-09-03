@@ -30,14 +30,13 @@ sys.path.insert(0, str(ROOT))
 
 import yaml  # noqa: E402
 
-from demo import AGENT_PLAN, NOW, SECRET  # noqa: E402
+from demo import (ACT_TITLES, AGENT_PLAN, MOVES_MONEY, SECRET,  # noqa: E402
+                  timestamp_for, tokens_for)
 from gatekeeper.backends import MockBackend  # noqa: E402
 from gatekeeper.console import use_utf8_stdout  # noqa: E402
 from gatekeeper.models import ActionRequest  # noqa: E402
 from gatekeeper.proxy import Gatekeeper  # noqa: E402
-from gatekeeper.tokens import issue  # noqa: E402
 
-MOVES_MONEY = ("create_refund", "create_payout", "capture_payment")
 
 # Which lifecycle stage actually decided. Derived from the rule ids the proxy
 # records rather than from a new field, so the page cannot claim a stage the
@@ -125,37 +124,38 @@ def run() -> dict:
     # ---- run 1: nothing in the way -------------------------------------
     ungoverned, moved = [], 0
     backend = MockBackend()
-    for op, args in AGENT_PLAN:
-        amt = int(args.get("amount", 0))
+    for a in AGENT_PLAN:
         try:
-            backend.call(op, args)
-            delta = amt if op in MOVES_MONEY else 0
+            result = backend.call(a.op, a.args)
+            amt = int(result.get("amount") or 0)
+            delta = amt if a.op in MOVES_MONEY else 0
             moved += delta
-            ungoverned.append({"op": op, "amount_paise": amt, "executed": True,
+            ungoverned.append({"op": a.op, "amount_paise": amt, "executed": True,
                                "moved_paise": delta, "running_paise": moved,
                                "error": None})
         except Exception as e:                                    # noqa: BLE001
-            ungoverned.append({"op": op, "amount_paise": amt, "executed": False,
+            ungoverned.append({"op": a.op, "amount_paise": 0, "executed": False,
                                "moved_paise": 0, "running_paise": moved,
                                "error": str(e)})
 
     # ---- run 2: the same agent, behind the proxy ------------------------
     db = tempfile.mktemp(suffix=".db")
     gk = Gatekeeper(backend=MockBackend(), db_path=db, signing_secret=SECRET)
-    token = issue("buyer-1", sorted({op for op, _ in AGENT_PLAN} - {"transfer_all_funds"}),
-                  secret=SECRET, ttl_seconds=86_400, now=NOW)
+    tokens = tokens_for(AGENT_PLAN)
 
     results, moved2 = [], 0
-    for i, (op, args) in enumerate(AGENT_PLAN):
-        res = gk.handle(token, ActionRequest(op=op, args=args), now=NOW + i)
-        amt = int(args.get("amount", 0))
-        delta = amt if (res.executed and op in MOVES_MONEY) else 0
+    for i, a in enumerate(AGENT_PLAN):
+        req = ActionRequest(op=a.op, args=a.args)
+        res = gk.handle(tokens[a.token], req, now=timestamp_for(i, a))
+        amt = req.amount_paise
+        delta = amt if (res.executed and a.op in MOVES_MONEY) else 0
         moved2 += delta
-        results.append((op, args, res, amt, delta, moved2))
+        results.append((a, req, res, amt, delta, moved2))
 
     rows = list(gk.audit.rows())
     by_seq = {r["seq"]: [x for x in (r["rule_ids"] or "").split(",") if x]
               for r in rows}
+    expl_by_seq = {r["seq"]: " ".join((r["explanation"] or "").split()) for r in rows}
 
     _raw = yaml.safe_load((ROOT / "policies/default.yaml").read_text(encoding="utf-8"))
     RULE_THREAT = {r["id"]: str(r.get("threat", "")) for r in _raw["rules"]}
@@ -164,13 +164,18 @@ def run() -> dict:
     RULE_THREAT["AUTH-001"] = "T3"
 
     governed = []
-    for op, args, res, amt, delta, running in results:
+    for a, req, res, amt, delta, running in results:
         audit_rules = by_seq.get(res.audit_seq, [])
         governed.append({
-            "op": op,
+            "op": a.op,
             "amount_paise": amt,
-            "counterparty": ActionRequest(op=op, args=args).counterparty,
-            "args": {k: v for k, v in args.items() if k != "notes"},
+            "counterparty": req.counterparty,
+            "args": {k: str(v) for k, v in a.args.items() if k != "notes"},
+            "thought": a.thought,
+            "act": a.act,
+            "act_title": ACT_TITLES[a.act],
+            "token": a.token,
+            "hour": a.hour,
             "verdict": res.decision.verdict.value,
             "executed": res.executed,
             "replayed": res.replayed,
@@ -181,7 +186,13 @@ def run() -> dict:
             # which left the proxy's own controls looking threat-less.
             "threats": sorted({RULE_THREAT[r] for r in audit_rules
                                if RULE_THREAT.get(r, "").startswith("T")}),
-            "explanation": " ".join(res.decision.explanation.split()),
+            # On a replay, decision.explanation still holds the POLICY reason
+            # ("allowed, within the per-action limit"), which reads as though
+            # the money moved a second time. The audit row carries what
+            # actually happened, so prefer it.
+            "explanation": (expl_by_seq.get(res.audit_seq)
+                            if res.replayed
+                            else " ".join(res.decision.explanation.split())),
             "moved_paise": delta,
             "running_paise": running,
             "audit_seq": res.audit_seq,

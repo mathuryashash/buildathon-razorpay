@@ -81,7 +81,6 @@ class CallOutcome:
 
 @dataclass
 class Corpus:
-    label: str
     outcomes: list[CallOutcome] = field(default_factory=list)
 
     @property
@@ -139,8 +138,8 @@ def _normalise(verdict: str) -> str:
     return "deny" if verdict in ("deny", "require_approval") else "allow"
 
 
-def run_corpus(scenarios: list[dict[str, Any]], label: str, *, deny_all: bool = False) -> Corpus:
-    corpus = Corpus(label)
+def run_corpus(scenarios: list[dict[str, Any]], *, deny_all: bool = False) -> Corpus:
+    corpus = Corpus()
     tmpdir = tempfile.mkdtemp(prefix="gatekeeper-eval-")
     for n, sc in enumerate(scenarios):
         # Fresh state per scenario so velocity cannot leak between them, in a
@@ -207,15 +206,15 @@ def main() -> int:
     args = ap.parse_args()
 
     here = Path(__file__).parent / "scenarios"
-    attacks = run_corpus(_load(here / "attacks.yaml"), "attack")
-    benign = run_corpus(_load(here / "benign.yaml"), "benign")
-    base_a = run_corpus(_load(here / "attacks.yaml"), "attack", deny_all=True)
-    base_b = run_corpus(_load(here / "benign.yaml"), "benign", deny_all=True)
+    attacks = run_corpus(_load(here / "attacks.yaml"))
+    benign = run_corpus(_load(here / "benign.yaml"))
+    base_a = run_corpus(_load(here / "attacks.yaml"), deny_all=True)
+    base_b = run_corpus(_load(here / "benign.yaml"), deny_all=True)
 
     holdout = None
     hp = here / "holdout.yaml"
     if args.holdout and hp.exists():
-        holdout = run_corpus(_load(hp), "holdout")
+        holdout = run_corpus(_load(hp))
 
     lat = sorted(o.latency_ms for o in attacks.outcomes + benign.outcomes)
     p95 = lat[int(len(lat) * 0.95) - 1] if lat else 0.0

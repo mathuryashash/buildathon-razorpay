@@ -21,14 +21,13 @@ import os
 import threading
 import time
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 from .audit import AuditLog
-from .backends import Backend, BackendError, get_backend
+from .backends import Backend, BackendError
 from .effects import EffectRegistry
 from .idempotency import IdempotencyStore, derive_key
 from .models import ActionRequest, ActionResult, Decision, Effect, Verdict
@@ -70,7 +69,6 @@ class Gatekeeper:
                 "secret is the same as no signature."
             )
         self.dry_run = dry_run
-        self.pending_approvals: list[dict[str, Any]] = []
         # ponytail: one process-wide lock, held for the whole request.
         #
         # `idem.get -> backend.call -> idem.put` is a read-modify-write across
@@ -174,11 +172,9 @@ class Gatekeeper:
                 explanation=decision.explanation, executed=False,
                 payload=request.args, ts=now,
             )
-            if decision.verdict == Verdict.REQUIRE_APPROVAL:
-                self.pending_approvals.append(
-                    {"seq": seq, "op": request.op, "args": request.args,
-                     "agent_id": cap.agent_id, "explanation": decision.explanation}
-                )
+            # No in-memory approval queue. There was one, and nothing ever
+            # read it: the CLI and GET /v1/approvals both go to the audit log,
+            # which is the only copy that survives a restart.
             return ActionResult(decision=decision, executed=False, audit_seq=seq)
 
         # 5. the grant's OWN bounds, applied only where policy already said yes

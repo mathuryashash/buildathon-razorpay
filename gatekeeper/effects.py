@@ -46,8 +46,5 @@ class EffectRegistry:
         """
         return self._map.get(op)
 
-    def known_operations(self) -> list[str]:
-        return sorted(self._map)
-
     def __len__(self) -> int:
         return len(self._map)

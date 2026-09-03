@@ -47,7 +47,7 @@ class MockBackend:
         if op == "create_order":
             return {"id": self._id("order"), "entity": "order", "amount": amount,
                     "currency": "INR", "status": "created", "receipt": args.get("receipt")}
-        if op in ("create_payment_link", "create_payment_link_upi"):
+        if op == "create_payment_link":
             pid = self._id("plink")
             return {"id": pid, "entity": "payment_link", "amount": amount, "currency": "INR",
                     "status": "created", "short_url": f"https://rzp.io/i/{pid[-8:]}"}

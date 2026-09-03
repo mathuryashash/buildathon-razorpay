@@ -7,7 +7,7 @@ path, stop -- see docs/DO_NOT_BUILD.md.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -179,5 +179,3 @@ class Capability(BaseModel):
     exp: int = Field(..., description="Unix expiry timestamp")
     nonce: str
 
-
-Channel = Literal["mock", "razorpay_test"]
