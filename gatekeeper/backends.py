@@ -83,6 +83,37 @@ NOT_IN_TEST_MODE = {
 }
 
 
+def payment_link_payload(args: dict[str, Any]) -> dict[str, Any]:
+    """Build the Payment Links body.
+
+    Pure, and separate from the call, because the bug it exists to prevent is
+    invisible offline. This used to send `"customer": args.get("customer", {})`
+    and Razorpay answered:
+
+        incorrect JSON object received - faulty key: customer
+
+    An empty customer object is not "no customer", it is a malformed one. The
+    mock happily accepted it, every test passed, and the failure surfaced on
+    the first live run -- against a real key, one line into the demo. Omitting
+    the key entirely is what "no customer" means on the wire.
+    """
+    body: dict[str, Any] = {
+        "amount": int(args["amount"]),
+        "currency": "INR",
+        "description": args.get("description", "Gatekeeper demo"),
+        "reminder_enable": False,
+        # Nobody's inbox needs a message from a demo. Also keeps the run
+        # silent when the same test customer is reused.
+        "notify": {"sms": False, "email": False},
+    }
+    customer = {k: v for k, v in (args.get("customer") or {}).items() if v}
+    if customer:
+        body["customer"] = customer
+    if args.get("notes"):
+        body["notes"] = args["notes"]
+    return body
+
+
 class RazorpayBackend:
     """Real Razorpay test mode.
 
@@ -124,13 +155,7 @@ class RazorpayBackend:
                     "notes": args.get("notes", {}),
                 })
             if op == "create_payment_link":
-                return c.payment_link.create({
-                    "amount": int(args["amount"]), "currency": "INR",
-                    "description": args.get("description", "Gatekeeper demo"),
-                    "customer": args.get("customer", {}),
-                    "notify": {"sms": False, "email": False},
-                    "reminder_enable": False,
-                })
+                return c.payment_link.create(payment_link_payload(args))
             if op == "fetch_payment_link":
                 return c.payment_link.fetch(args["payment_link_id"])
             if op == "cancel_payment_link":

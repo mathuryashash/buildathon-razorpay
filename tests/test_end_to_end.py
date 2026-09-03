@@ -183,3 +183,26 @@ def test_the_live_runner_only_asks_for_operations_it_has_scoped():
 
     missing = requested - scopes - {"fetch_payment_link"}   # polled off-proxy
     assert not missing, f"live.py requests {missing} but never grants it"
+
+
+def test_the_payment_link_payload_omits_an_empty_customer():
+    """The bug that only a live key could find.
+
+    `"customer": {}` is not "no customer" to the Payments API, it is a
+    malformed one, and it answers `incorrect JSON object received - faulty
+    key: customer`. The mock accepted it, all 78 tests passed, and the first
+    live run died one line into the demo. Pure function, so the shape is
+    checkable without a network or a key.
+    """
+    from gatekeeper.backends import payment_link_payload
+
+    bare = payment_link_payload({"amount": 17700})
+    assert "customer" not in bare, bare
+    assert bare["amount"] == 17700 and bare["currency"] == "INR"
+
+    # Present but entirely blank is still no customer.
+    blank = payment_link_payload({"amount": 1, "customer": {"name": "", "email": None}})
+    assert "customer" not in blank, blank
+
+    real = payment_link_payload({"amount": 1, "customer": {"name": "Priya", "email": ""}})
+    assert real["customer"] == {"name": "Priya"}

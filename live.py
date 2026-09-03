@@ -184,6 +184,19 @@ def main() -> int:
     print("\n  GATEKEEPER -- LIVE, against Razorpay test mode")
     print("  Every id below is real and will appear in your Dashboard.\n")
 
+    # TIME-001 holds money movement outside 08:00-21:00 local. Running the
+    # demo at midnight and watching the legitimate refund get held looks like
+    # a failure unless somebody says otherwise, so: say otherwise, up front.
+    hour = datetime.now().hour
+    if not 8 <= hour < 21:
+        print(f"  NOTE  It is {datetime.now():%H:%M} locally, outside the")
+        print("        08:00-21:00 window in TIME-001. Every money movement")
+        print("        below will be HELD for a human, including the")
+        print("        legitimate refund in Act III. That is the rule firing")
+        print("        correctly against a real clock, not a failure -- but")
+        print("        re-run between 08:00 and 21:00 to watch the allowed")
+        print("        refund actually execute.\n")
+
     # ── 1. the honest purchase ──────────────────────────────────────────
     print(RULE)
     print("  ACT I -- a real purchase")
@@ -197,7 +210,8 @@ def main() -> int:
                    "Order is open. Sending the customer a payment link for the "
                    "same Rs 177.00.",
                    amount=BASKET_PAISE, customer_id="cust_demo_001",
-                   description="Acme Organics -- 3 items")
+                   description="Acme Organics -- 3 items",
+                   customer={"name": "Priya Raman", "email": "priya@example.com"})
 
     payment_id = None
     if link and link.get("short_url"):

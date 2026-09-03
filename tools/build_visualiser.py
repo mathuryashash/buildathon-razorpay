@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate the data block inside visualiser.html from a real run.
+"""Regenerate the data blocks inside visualiser.html and pitch.html.
 
 The page is not a mockup. Every verdict, explanation, rule id, amount and
 audit hash it displays comes from actually executing demo.py's agent plan
@@ -13,12 +13,18 @@ notices for a week. The README's demo transcript was wrong twice. A page
 whose numbers are typed in by hand would be wrong a third time, and it is
 the artifact most likely to be looked at and least likely to be re-checked.
 
-The generator writes ONLY the contents of <script id="trace">. Everything
-else in visualiser.html is hand-authored and left alone.
+The generator writes ONLY the contents of <script id="trace"> in each page.
+Everything else in both files is hand-authored and left alone.
+
+pitch.html additionally carries the LIVE run, read out of gatekeeper-live.db
+if `make live` has been run. That database is gitignored, so on a fresh clone
+the run sheet says plainly that no live run is recorded rather than showing a
+transcript nobody produced.
 """
 from __future__ import annotations
 
 import json
+import pathlib
 import re
 import sys
 import tempfile
@@ -32,6 +38,7 @@ import yaml  # noqa: E402
 
 from demo import (ACT_TITLES, AGENT_PLAN, MOVES_MONEY, SECRET,  # noqa: E402
                   timestamp_for, tokens_for)
+from gatekeeper.audit import AuditLog  # noqa: E402
 from gatekeeper.backends import MockBackend  # noqa: E402
 from gatekeeper.console import use_utf8_stdout  # noqa: E402
 from gatekeeper.models import ActionRequest  # noqa: E402
@@ -121,6 +128,32 @@ def _stage_of(res, audit_rules: list[str]) -> int:
         # no classification at all. Attribute it where the cause is.
         return 3 if "SCOPE-001" in audit_rules else 4
     return 7 if res.executed else 8
+
+
+def live_run() -> list[dict] | None:
+    """The last live run against real Razorpay, straight from its audit log.
+
+    Not retyped into the page. The run sheet quotes real object ids in front
+    of a judge, and a hand-copied transcript is one refactor away from quoting
+    ids that never existed.
+    """
+    db = ROOT / "gatekeeper-live.db"
+    if not db.exists():
+        return None
+    log = AuditLog(str(db))
+    out = []
+    for r in log.rows():
+        payload = json.loads(r["payload"] or "{}")
+        out.append({
+            "op": r["op"],
+            "verdict": r["verdict"],
+            "amount_paise": r["amount_paise"],
+            # The real Razorpay id, when the call actually executed.
+            "ref": payload.get("result_id") or "",
+            "explanation": " ".join((r["explanation"] or "").split()),
+        })
+    log.close()
+    return out
 
 
 def run() -> dict:
@@ -249,6 +282,7 @@ def run() -> dict:
         "chain_len": chain.checked,
         "held_count": len(held),
         "totals": {"ungoverned_paise": moved, "governed_paise": moved2},
+        "live": live_run(),
         "eval": {
             "block_rate": ev["attack"]["block_rate"],
             "blocked": ev["attack"]["blocked"],
@@ -269,26 +303,46 @@ def run() -> dict:
     }
 
 
-def main() -> int:
-    page = ROOT / "visualiser.html"
+def _inject(page: pathlib.Path, data: str) -> bool:
     if not page.exists():
-        print(f"FATAL: {page} does not exist. This script fills in its data "
+        print(f"FATAL: {page} does not exist. This script fills in a data "
               f"block; it does not create the page.", file=sys.stderr)
-        return 2
-
-    data = json.dumps(run(), indent=1, ensure_ascii=False)
-    html = page.read_text(encoding="utf-8")
+        return False
     new, n = re.subn(
         r'(<script id="trace" type="application/json">).*?(</script>)',
         lambda m: m.group(1) + "\n" + data + "\n" + m.group(2),
-        html, count=1, flags=re.S)
+        page.read_text(encoding="utf-8"), count=1, flags=re.S)
     if n != 1:
-        print('FATAL: could not find <script id="trace" type="application/json">',
-              file=sys.stderr)
-        return 2
+        print(f'FATAL: no <script id="trace"> in {page.name}', file=sys.stderr)
+        return False
     page.write_text(new, encoding="utf-8")
-    print(f"visualiser.html updated — {len(data):,} bytes of trace from a live run")
-    return 0
+    print(f"  {page.name:<18} {len(data):>7,} bytes")
+    return True
+
+
+def main() -> int:
+    payload = run()
+    full = json.dumps(payload, indent=1, ensure_ascii=False)
+
+    # The run sheet needs the headline figures and the live transcript, not
+    # the 22-action trace or the stage prose. Sending it everything would
+    # double the page for nothing.
+    slim = json.dumps({
+        "generated": payload["generated"],
+        "governed": [{"verdict": g["verdict"], "executed": g["executed"],
+                      "replayed": g["replayed"]} for g in payload["governed"]],
+        "totals": payload["totals"],
+        "eval": payload["eval"],
+        "live": payload["live"],
+    }, indent=1, ensure_ascii=False)
+
+    print("regenerated from a live run:")
+    ok = _inject(ROOT / "visualiser.html", full)
+    ok = _inject(ROOT / "pitch.html", slim) and ok
+    n_live = len(payload["live"] or [])
+    print(f"  live run           {n_live or 'none recorded'}"
+          f"{' record(s) from gatekeeper-live.db' if n_live else ''}")
+    return 0 if ok else 2
 
 
 if __name__ == "__main__":
