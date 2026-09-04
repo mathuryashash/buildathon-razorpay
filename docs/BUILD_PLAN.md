@@ -16,8 +16,8 @@ remains is verification, honesty, and packaging.
 - [x] Content-addressed idempotency, checked before execution, under a lock
 - [x] Mock backend (Razorpay-shaped) and real test-mode backend
 - [x] Reference merchant + buyer agent, checkout end to end
-- [x] 52 eval scenarios / 145 calls across two corpora + deny-all baseline
-- [x] 73 unit tests, CI, Makefile, 20 ADRs, docs
+- [x] 53 eval scenarios / 145 calls across two corpora + deny-all baseline
+- [x] Unit tests, CI, Makefile, 21 ADRs, docs
 - [x] Ten real bugs found and written up — two by the eval during the build,
       three by a self-review, five by an adversarial review pass
 

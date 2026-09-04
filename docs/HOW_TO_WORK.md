@@ -20,7 +20,7 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"   # paste into GATE
 
 make preflight   # confirms the key works before anything is created with it
 
-make test        # 73 tests, ~0.5s, no network
+make test        # the full suite, seconds, no network
 make eval        # the red-team numbers
 make demo        # the pitch demo
 ```

@@ -140,7 +140,7 @@ prompt.
 
 ## Results
 
-`make eval` -- 52 scenarios, 145 calls, deterministic, offline, reproducible.
+`make eval` -- 53 scenarios, 145 calls, deterministic, offline, reproducible.
 
 | Metric | Result |
 |---|---|
@@ -604,7 +604,7 @@ pip install -r requirements.txt
 cp .env.example .env
 python -c "import secrets; print(secrets.token_urlsafe(32))"  # → GATEKEEPER_SIGNING_SECRET
 
-make test     # 78 tests, ~5s, no network
+make test     # the full suite, seconds, no network
 make eval     # reproduces every number in the table above
 make demo     # the two-run comparison
 ```
@@ -647,13 +647,13 @@ has no business holding a production credential.
 | `gatekeeper/tokens.py` | Capability tokens. The trust boundary lives here. |
 | `policies/effects.yaml` | Operation → effect class. Absent means denied. |
 | `policies/default.yaml` | 15 rules, each citing a threat. |
-| `evals/` | 52 scenarios / 145 calls across two corpora + the harness. |
+| `evals/` | 53 scenarios / 145 calls across two corpora + the harness. |
 | `visualiser.html` | The run above, step-through-able in a browser. Data baked in from a live run by `tools/build_visualiser.py`. |
 | `live.py` | The same argument against the real Razorpay test-mode API. `make preflight` first. |
 | `pitch.html` | A timed run sheet for the five-minute video: what to say, when, with what on screen. Figures injected from the same trace as the visualiser. |
 | `docs/BUILD-DECISIONS.md` | Why the demo, the visualiser and the live path are shaped this way, and what the first live run found. |
 | `tests/test_end_to_end.py` | The agent → proxy → merchant path, in process. The Track 01 "end to end" clause, checked rather than asserted. |
-| `docs/DECISIONS.md` | 20 ADRs, including the ten "what broke" records. |
+| `docs/DECISIONS.md` | 21 ADRs, including the ten "what broke" records. |
 | `docs/DO_NOT_BUILD.md` | Anti-scope. What not to build and why. |
 | `docs/HOW_TO_WORK.md` | Setup, the change loop, how to add a rule safely. |
 
