@@ -183,7 +183,16 @@ class RazorpayBackend:
                 # Not on the SDK surface; the raw GET is the documented route.
                 return c.get(f"{c.base_url}/settlements", {}, {})
         except Exception as e:  # razorpay raises a family of errors
-            raise BackendError(f"razorpay call {op} failed: {e}") from e
+            # str(e) on the SDK's error classes is sometimes empty, which
+            # produced the audit line "razorpay call create_refund failed:"
+            # -- a recorded failure with no stated reason, in the log this
+            # project exists to make readable. Always name the exception type,
+            # and fall back to the raw args when there is no message.
+            detail = str(e).strip() or (
+                "; ".join(str(a) for a in getattr(e, "args", ()) if str(a).strip())
+                or "the SDK raised it with no message")
+            raise BackendError(
+                f"razorpay call {op} failed ({type(e).__name__}): {detail}") from e
 
         if op in NOT_IN_TEST_MODE:
             raise BackendError(

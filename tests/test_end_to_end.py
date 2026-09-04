@@ -206,3 +206,32 @@ def test_the_payment_link_payload_omits_an_empty_customer():
 
     real = payment_link_payload({"amount": 1, "customer": {"name": "Priya", "email": ""}})
     assert real["customer"] == {"name": "Priya"}
+
+
+def test_a_backend_failure_always_states_a_reason():
+    """An audit record for a failed money call must say why it failed.
+
+    The live run produced `razorpay call create_refund failed:` with nothing
+    after the colon, because `str(e)` on the SDK's error classes is sometimes
+    empty. A recorded failure with no stated reason is the exact defect this
+    project's audit trail exists to prevent.
+    """
+    from gatekeeper.backends import BackendError, RazorpayBackend
+
+    class Silent(Exception):
+        def __str__(self):
+            return ""
+
+    be = RazorpayBackend.__new__(RazorpayBackend)          # no credential needed
+
+    class Client:
+        def __getattr__(self, _):
+            raise Silent()
+
+    be._client = Client()
+    with pytest.raises(BackendError) as ei:
+        be.call("create_refund", {"payment_id": "p", "amount": 1})
+
+    msg = str(ei.value)
+    assert msg.rstrip().endswith("no message") or "Silent" in msg, msg
+    assert not msg.rstrip().endswith(":"), f"failure recorded with no reason: {msg!r}"

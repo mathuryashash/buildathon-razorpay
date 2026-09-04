@@ -749,7 +749,7 @@ footer a { color: var(--accent); }
 
 <script id="trace" type="application/json">
 {
- "generated": "2026-09-03 23:28",
+ "generated": "2026-09-04 09:48",
  "stages": [
   {
    "n": 1,
@@ -1954,14 +1954,14 @@ footer a { color: var(--accent); }
    "op": "create_order",
    "verdict": "allow",
    "amount_paise": 17700,
-   "ref": "order_TXeMcCl05WFWOn",
+   "ref": "order_TXolXNUWCbKlwB",
    "explanation": "Allowed: 'create_order' creates a reversible record for ₹177.00."
   },
   {
    "op": "create_payment_link",
    "verdict": "allow",
    "amount_paise": 17700,
-   "ref": "plink_TXeMcl9ZoleJCt",
+   "ref": "plink_TXolXtGEVuW4Uo",
    "explanation": "Allowed: 'create_payment_link' creates a reversible record for ₹177.00."
   },
   {
@@ -1987,10 +1987,10 @@ footer a { color: var(--accent); }
   },
   {
    "op": "create_refund",
-   "verdict": "require_approval",
-   "amount_paise": 7400,
+   "verdict": "allow",
+   "amount_paise": 0,
    "ref": "",
-   "explanation": "Held for approval: money movement outside 08:00-21:00 local time is reviewed by a human before it executes."
+   "explanation": "Allowed by policy but the payment provider rejected it: razorpay call create_refund failed:"
   }
  ],
  "eval": {

@@ -255,7 +255,51 @@ proxy, with the agent holding no credential. Everything above the backend line
 grant ceilings, idempotency, the hash-chained audit — behaved identically
 against the live API and the mock. That is the mock's job, and it did it.
 
-### The run, as recorded
+### The second run, inside business hours
+
+Re-run at 09:2x on 4 September so that TIME-001 would not hold Act III. The
+link went unpaid again, but the run was more informative than the first for a
+reason that has nothing to do with the payment:
+
+```
+allow  create_order          ₹177.00   order_TXolXNUWCbKlwB   [REAL]
+allow  create_payment_link   ₹177.00   plink_TXolXtGEVuW4Uo   [REAL]
+deny   create_refund       ₹2,500.00   over the per-action cap
+deny   create_refund                —   amount 250000.0 unreadable
+deny   create_payout       ₹5,000.00   over the per-action cap
+allow  create_refund          ₹74.00   ALLOWED by policy, refused by Razorpay
+chain intact across 6 records
+```
+
+The last line is the interesting one. Inside business hours the legitimate
+refund passed **every** rule — and then the API rejected it, because there was
+no real payment behind it. The proxy recorded the failure and carried on.
+
+That is the layering working as intended, and it is worth saying out loud:
+**the proxy is not the only thing that can say no.** When the payments API
+refuses, that refusal is audited too, with the same weight as a policy denial.
+A proxy that only logged its own decisions would show this action as allowed
+and leave the reader to assume money moved.
+
+### A third bug, from the second run
+
+The audit line read:
+
+```
+ERROR  create_refund  ₹74.00
+       -> razorpay call create_refund failed:
+```
+
+Nothing after the colon. `str(e)` on the SDK's error classes is sometimes
+empty, so the audit trail recorded a failed money call **with no stated
+reason** — in the log whose entire purpose is being readable. The handler now
+always names the exception type and falls back to the raw args. Regression
+test in `tests/test_end_to_end.py`.
+
+Three live runs, three bugs, none of them findable offline. That ratio is the
+argument for the live path existing at all.
+
+### The first run, as recorded
 
 Six audit records against the real API. Two real Razorpay objects, both
 visible in the Dashboard:
