@@ -4,9 +4,11 @@ Unlisted YouTube is fine. One take beats a polished edit — reads as more
 honest, and it's faster. Read this cold once before recording; it should take
 under a minute to get comfortable with the beats.
 
-**Structure: 40s hook · 70s demo · 60s mechanism · 50s live proof · 45s numbers · 35s close.**
+**Structure: 40s hook · 70s demo · 60s mechanism · 50s live proof · 45s numbers · 40s fixes · 35s close.**
 The numbers section (the held-out 15/21) is what separates this from every
-other entry claiming 100%. Do not cut it, do not soften it.
+other entry claiming 100%. Do not cut it, do not soften it. The fixes section
+right after it is what separates this from every entry that found real gaps
+and quietly sat on them.
 
 Companion file: `docs/BUILD-DECISIONS.md` has the reasoning behind every
 choice below, if a question comes up in the panel round that this script
@@ -104,10 +106,29 @@ real order/payment-link ids from `live.py`.
 > with your own UPI ID, the customer pays a stranger, the balance never
 > moves.
 >
-> **I didn't fix it.** Fixing it after seeing the result means the number is
-> now meaningless. I wrote it down instead."
+> That number does not move, ever — it's the score of one exact commit,
+> tagged, frozen. Editing the code afterward can't change what a blind
+> reviewer already found against it."
 
-## 4:25–5:00 — The close
+## 4:25–5:05 — What I did about it
+
+**On screen:** the findings table — four rows, three marked fixed or
+partially fixed.
+
+> "Here's the part most people skip: what happened *after* the score was
+> locked in. Three of the four gaps are closed now, in commits dated after
+> the freeze. A refund can no longer be pointed at the wrong customer's
+> payment. The cap that made a real ₹740 refund impossible is now a band a
+> human can approve instead of a wall. And the exact cancel-and-reissue
+> attack the reviewer found — closed, though only that specific pattern, not
+> the whole class; a first-time link still isn't checked, and I say so.
+>
+> One I left open on purpose: an agent can write a note onto a held payment
+> claiming it was already approved. The right fix needs a real design
+> decision, not something I want to rush the night before a deadline. Ship
+> nothing rather than ship the wrong thing fast."
+
+## 5:05–5:40 — The close
 
 > "Ten real bugs shipped and got caught across three review passes — a float
 > that silently switched off every cap, a race condition that let concurrent
@@ -117,11 +138,12 @@ real order/payment-link ids from `live.py`.
 > The honest ceiling: if the agent ever gets a real credential some other
 > way, this is bypassed entirely. Nothing here defends against that.
 >
-> What I'd build next isn't in my original plan — it's what the blind
-> reviewer found. Bind outgoing payment links the same way I already bind
-> refunds."
+> What I'd build next is the rest of what the blind reviewer found — the
+> first-time payment link, and giving audit-surface writes their own review
+> path."
 
-**Last frame:** hold on the 15/21 tile. Do not end on code.
+**Last frame:** hold on the findings table, three rows fixed. Do not end on
+code.
 
 ---
 
@@ -138,4 +160,7 @@ outcomes do.
 2. The mechanism walkthrough's stage-by-stage clicking — just say the
    sentence about idempotency-before-execution and move on.
 
-**Never cut:** the hook, the held-out number, the line "I didn't fix it."
+**Never cut:** the hook, the held-out number, and the fixes beat right after
+it. The held-out number without "and here's what I did about it" reads as a
+confession with no follow-through; together they're the strongest four
+minutes in the video.

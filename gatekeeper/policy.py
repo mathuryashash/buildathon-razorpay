@@ -72,6 +72,15 @@ class EvalFacts:
     amount_missing: bool = False   # no `amount` key on the request at all
     raw_amount: str = ""       # as sent, for the denial message only
     counterparties: tuple[str, ...] = ()   # EVERY destination named, not just the first
+    # H-02 (sealed hold-out): true only when THIS process has itself recorded
+    # who a payment_id really belongs to (via a capture it handled) and the
+    # current request names someone else. See ADR-022.
+    owner_mismatch: bool = False
+    true_owner: str = ""       # who the payment was actually captured for
+    # H-05 (sealed hold-out): true only for a payment link re-issued, within
+    # the velocity window, for the same customer and the same amount as one
+    # just cancelled, but pointed at a different destination. See ADR-024.
+    relink_destination_changed: bool = False
 
 
 ConditionFn = Callable[[Any, EvalFacts], bool]
@@ -103,6 +112,8 @@ CONDITIONS: dict[str, ConditionFn] = {
     "hour_outside": lambda v, f: not (int(v[0]) <= f.hour_local < int(v[1])),
     "amount_invalid": lambda v, f: (not f.amount_valid) is bool(v),
     "amount_missing": lambda v, f: f.amount_missing is bool(v),
+    "owner_mismatch": lambda v, f: f.owner_mismatch is bool(v),
+    "relink_destination_changed": lambda v, f: f.relink_destination_changed is bool(v),
 }
 
 
@@ -143,6 +154,7 @@ class Rule:
             counterparty_count=facts.counterparty_count,
             raw_amount=facts.raw_amount,
             counterparties=", ".join(facts.counterparties) or "no destination at all",
+            true_owner=facts.true_owner or "a different customer",
         )
 
 
@@ -183,6 +195,9 @@ class PolicyEngine:
         ctx: Context,
         hour_local: int,
         now: float,
+        owner_mismatch: bool = False,
+        true_owner: str = "",
+        relink_destination_changed: bool = False,
     ) -> Decision:
         cp = request.counterparty
         w = self.window_seconds
@@ -205,6 +220,9 @@ class PolicyEngine:
             amount_missing=request.amount_missing,
             raw_amount=request.raw_amount,
             counterparties=tuple(request.counterparties),
+            owner_mismatch=owner_mismatch,
+            true_owner=true_owner,
+            relink_destination_changed=relink_destination_changed,
         )
 
         hits: list[RuleHit] = []

@@ -15,7 +15,8 @@ def test_reads_are_allowed(gk, token):
 
 
 def test_per_action_cap_blocks_large_irreversible_money(gk, token):
-    assert act(gk, token, "create_refund", amount=50001, customer_id="cust_demo_001") == "deny"
+    # Above CAP-003's band too -- CAP-001's hard deny, not merely held.
+    assert act(gk, token, "create_refund", amount=100001, customer_id="cust_demo_001") == "deny"
 
 
 def test_per_action_cap_is_inclusive_at_the_boundary(gk, token):
@@ -24,7 +25,31 @@ def test_per_action_cap_is_inclusive_at_the_boundary(gk, token):
 
 
 def test_amount_as_string_is_not_a_bypass(gk, token):
-    assert act(gk, token, "create_refund", amount="50001", customer_id="cust_demo_001") == "deny"
+    assert act(gk, token, "create_refund", amount="100001", customer_id="cust_demo_001") == "deny"
+
+
+def test_a_mid_band_refund_is_held_not_denied(gk, token):
+    """CAP-003, the H-01 fix.
+
+    A full refund on the merchant's own Rs 740 jar of ghee used to be
+    structurally impossible -- CAP-001 hard-denied anything over Rs 500, with
+    no path to a human. It is now HELD, not blocked: large enough that an
+    agent should not clear it alone, small enough to plausibly be a real
+    return.
+    """
+    assert act(gk, token, "create_refund", amount=74000,
+              customer_id="cust_demo_001") == "require_approval"
+
+
+def test_the_old_cap001_boundary_is_now_held_rather_than_denied(gk, token):
+    """The exact amount that used to be CAP-001's boundary test.
+
+    Rs 500.01 is over the agent limit but comfortably under the new Rs 1,000
+    hard ceiling -- CAP-003's band, not CAP-001's. A rule change that quietly
+    widened CAP-001 back to deny here would silently undo the H-01 fix.
+    """
+    assert act(gk, token, "create_refund", amount=50001,
+              customer_id="cust_demo_001") == "require_approval"
 
 
 def test_refund_to_unknown_recipient_is_blocked(gk, token):
@@ -279,3 +304,134 @@ def test_the_proxy_refuses_to_exist_without_a_signing_secret(monkeypatch):
     monkeypatch.delenv("GATEKEEPER_SIGNING_SECRET", raising=False)
     with pytest.raises(ValueError, match="signing secret"):
         Gatekeeper(backend=MockBackend(), db_path=tempfile.mktemp(suffix=".db"))
+
+
+# ---- OWNER-001: refund ownership, the H-02 hold-out fix --------------------
+
+
+def test_a_refund_to_a_different_customer_than_who_paid_is_denied(gk, token):
+    """The exact H-02 attack: bounds pass, destination is a known customer,
+    ownership is simply never checked. DEST-001 alone let this through."""
+    assert act(gk, token, "capture_payment", payment_id="pay_owned_001",
+              amount=10000, customer_id="cust_demo_001") == "allow"
+    res = gk.handle(token, ActionRequest(
+        op="create_refund",
+        args={"payment_id": "pay_owned_001", "amount": 5000, "customer_id": "cust_demo_002"}),
+        now=BUSINESS_HOURS_TS)
+    assert res.decision.verdict.value == "deny"
+    assert not res.executed
+    assert "OWNER-001" in [h.rule_id for h in res.decision.hits]
+
+
+def test_a_refund_to_the_customer_who_actually_paid_is_allowed(gk, token):
+    assert act(gk, token, "capture_payment", payment_id="pay_owned_002",
+              amount=10000, customer_id="cust_demo_001") == "allow"
+    assert act(gk, token, "create_refund", payment_id="pay_owned_002",
+              amount=5000, customer_id="cust_demo_001") == "allow"
+
+
+def test_a_payment_id_this_proxy_never_captured_is_not_flagged_by_ownership(gk, token):
+    """The honest limit of OWNER-001, made explicit rather than discovered.
+
+    A payment_id with no recorded owner cannot be verified, so it is not
+    denied by THIS rule -- DEST-001 (a known customer) is what still governs
+    it, exactly as before H-02 was found.
+    """
+    assert act(gk, token, "create_refund", payment_id="pay_never_seen",
+              amount=5000, customer_id="cust_demo_001") == "allow"
+
+
+# ---- LINK-001: inbound redirection, the H-05 hold-out fix ------------------
+#
+# The exact H-05 attack: cancel a live link, reissue an identical one at an
+# attacker's own destination. The merchant's balance never moves, so no cap
+# or velocity rule on money moved ever sees it. All three tests below use the
+# real plink id `create_payment_link` returns, rather than a guessed one.
+
+
+def test_a_resent_link_to_the_same_destination_is_allowed(gk, token):
+    """A customer's payment app glitched; the merchant cancels and resends
+    the identical link. Must not be treated as an attack."""
+    r1 = gk.handle(token, ActionRequest(op="create_payment_link", args={
+        "amount": 21000, "customer_id": "cust_demo_001", "upi_id": "priya@okhdfcbank"}),
+        now=BUSINESS_HOURS_TS)
+    assert r1.decision.verdict.value == "allow"
+    plink_id = r1.result["id"]
+
+    r2 = gk.handle(token, ActionRequest(
+        op="cancel_payment_link", args={"payment_link_id": plink_id}),
+        now=BUSINESS_HOURS_TS + 1)
+    assert r2.decision.verdict.value == "allow"
+
+    r3 = gk.handle(token, ActionRequest(op="create_payment_link", args={
+        "amount": 21000, "customer_id": "cust_demo_001", "upi_id": "priya@okhdfcbank"}),
+        now=BUSINESS_HOURS_TS + 2)
+    assert r3.decision.verdict.value == "allow"
+
+
+def test_a_reissued_link_with_a_swapped_destination_is_denied(gk, token):
+    r1 = gk.handle(token, ActionRequest(op="create_payment_link", args={
+        "amount": 56000, "customer_id": "cust_demo_003", "upi_id": "acmeorganics@okhdfcbank"}),
+        now=BUSINESS_HOURS_TS)
+    assert r1.decision.verdict.value == "allow"
+    plink_id = r1.result["id"]
+
+    r2 = gk.handle(token, ActionRequest(
+        op="cancel_payment_link", args={"payment_link_id": plink_id}),
+        now=BUSINESS_HOURS_TS + 1)
+    assert r2.decision.verdict.value == "allow"
+
+    r3 = gk.handle(token, ActionRequest(op="create_payment_link", args={
+        "amount": 56000, "customer_id": "cust_demo_003", "upi_id": "attacker@okaxis"}),
+        now=BUSINESS_HOURS_TS + 2)
+    assert r3.decision.verdict.value == "deny"
+    assert not r3.executed
+    assert "LINK-001" in [h.rule_id for h in r3.decision.hits]
+
+
+def test_a_different_customer_after_a_cancellation_is_unaffected(gk, token):
+    """The redirect check is keyed by customer, not just by agent and amount.
+
+    Without that, two unrelated legitimate orders of the same round amount
+    for two different customers within ten minutes would false-positive.
+    """
+    r1 = gk.handle(token, ActionRequest(op="create_payment_link", args={
+        "amount": 21000, "customer_id": "cust_demo_001", "upi_id": "priya@okhdfcbank"}),
+        now=BUSINESS_HOURS_TS)
+    plink_id = r1.result["id"]
+    gk.handle(token, ActionRequest(
+        op="cancel_payment_link", args={"payment_link_id": plink_id}),
+        now=BUSINESS_HOURS_TS + 1)
+
+    r3 = gk.handle(token, ActionRequest(op="create_payment_link", args={
+        "amount": 21000, "customer_id": "cust_demo_002", "upi_id": "arjun@okaxis"}),
+        now=BUSINESS_HOURS_TS + 2)
+    assert r3.decision.verdict.value == "allow"
+
+
+def test_a_first_time_link_with_no_prior_cancellation_is_unaffected(gk, token):
+    """The honest limit of LINK-001: a brand-new link has nothing to compare
+    against, so an attacker-controlled destination on a FIRST link is not
+    caught by this rule. Named plainly rather than discovered later."""
+    res = gk.handle(token, ActionRequest(op="create_payment_link", args={
+        "amount": 56000, "customer_id": "cust_demo_003", "upi_id": "attacker@okaxis"}),
+        now=BUSINESS_HOURS_TS)
+    assert res.decision.verdict.value == "allow"
+
+
+def test_cancel_payment_link_actually_executes_against_the_mock(gk, token):
+    """MockBackend had no branch for cancel_payment_link and fell through to
+    BackendError on every call. B4-02's benign scenario only checks that the
+    VERDICT is allow -- computed at step 4, before the backend is reached --
+    so a policy allow plus a silent execution failure still read as 'allow'
+    and nobody noticed the cancel never actually ran."""
+    r1 = gk.handle(token, ActionRequest(
+        op="create_payment_link",
+        args={"amount": 21000, "customer_id": "cust_demo_001"}),
+        now=BUSINESS_HOURS_TS)
+    res = gk.handle(token, ActionRequest(
+        op="cancel_payment_link", args={"payment_link_id": r1.result["id"]}),
+        now=BUSINESS_HOURS_TS + 1)
+    assert res.decision.verdict.value == "allow"
+    assert res.executed, "cancel_payment_link did not actually execute"
+    assert res.error is None

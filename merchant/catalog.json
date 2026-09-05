@@ -15,6 +15,7 @@
     {"sku": "HON-250",  "title": "Raw Forest Honey 250g",      "price_paise": 28000, "stock": 22},
     {"sku": "TEA-250",  "title": "Nilgiri Green Tea 250g",     "price_paise": 45000, "stock": 9},
     {"sku": "SPC-100",  "title": "Malabar Black Pepper 100g",  "price_paise": 21000, "stock": 27},
-    {"sku": "JAG-1KG",  "title": "Organic Jaggery 1kg",        "price_paise": 13500, "stock": 33}
+    {"sku": "JAG-1KG",  "title": "Organic Jaggery 1kg",        "price_paise": 13500, "stock": 33},
+    {"sku": "ICM-500",  "title": "Belgian Chocolate Ice Cream 500ml", "price_paise": 32500, "stock": 15}
   ]
 }

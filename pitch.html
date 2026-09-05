@@ -343,10 +343,11 @@ footer { margin-top: 46px; padding-top: 18px; border-top: 3px solid var(--ink); 
     <div class="warnbox">
       <h3>The sentence that wins the room</h3>
       <p>
-        <strong>None of it is fixed.</strong> Fixing after the run tunes the
-        proxy against the scenarios scoring it, and a hold-out only works once.
-        The choice was a better proxy with a meaningless number, or a worse
-        proxy with a real number and four findings written down.
+        <strong>That score never moves.</strong> Fixing before the run was
+        scored would have tuned the proxy against the scenarios scoring it —
+        it's frozen, tagged, and a hold-out only means something the first
+        time. What happens to the bugs it found <em>after</em> the score is
+        locked in is a different question, and the next beat is the answer.
       </p>
     </div>
   </div>
@@ -354,7 +355,37 @@ footer { margin-top: 46px; padding-top: 18px; border-top: 3px solid var(--ink); 
 
 <!-- ─────────────────────────────────────────────────────────────────── -->
 <div class="beat">
-  <div class="tc"><div class="t">4:25</div><div class="len">45 sec</div></div>
+  <div class="tc"><div class="t">4:25</div><div class="len">40 sec</div></div>
+  <div>
+    <h2>What I did about it</h2>
+    <p class="aim">Aim · the line that beats every entry claiming 100%</p>
+    <p class="say">
+      Three of the four gaps are closed now, dated after the freeze. A
+      refund can no longer be pointed at the wrong customer's payment. The
+      cap that made a real ₹740 refund impossible is a reviewable band now,
+      not a wall. And the exact cancel-and-reissue attack the reviewer
+      found — closed, though only that pattern, not the whole class; a
+      first-time link still isn't checked, and that's said plainly rather
+      than glossed over.
+    </p>
+    <p class="say">
+      One stays open on purpose: an agent can still write a note onto a
+      held payment claiming prior approval. The right fix is a real design
+      decision — a new review path for anything that writes into the audit
+      surface — and that isn't something to rush the night before a
+      deadline. Ship nothing rather than ship the wrong thing fast.
+    </p>
+    <div class="show">
+      <h3>On screen</h3>
+      <p>The findings table from <code class="cmd">visualiser.html</code> —
+      three rows now read fixed or partially fixed.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────────────────────────────────────────────────────────────── -->
+<div class="beat">
+  <div class="tc"><div class="t">5:05</div><div class="len">45 sec</div></div>
   <div>
     <h2>What broke</h2>
     <p class="aim">Aim · the application asks for this explicitly. Answer it well.</p>
@@ -389,7 +420,7 @@ footer { margin-top: 46px; padding-top: 18px; border-top: 3px solid var(--ink); 
 
 <!-- ─────────────────────────────────────────────────────────────────── -->
 <div class="beat">
-  <div class="tc"><div class="t">5:10</div><div class="len">close</div></div>
+  <div class="tc"><div class="t">5:50</div><div class="len">close</div></div>
   <div>
     <h2>Close on the ceiling, not the pitch</h2>
     <p class="aim">Aim · be the candidate who names the limit first</p>
@@ -401,14 +432,14 @@ footer { margin-top: 46px; padding-top: 18px; border-top: 3px solid var(--ink); 
       process, and now a serialised one, because correctness beat throughput.
     </p>
     <p class="say">
-      What I'd build next is the thing the hold-out found, not the thing I
-      planned: bind payment-link destinations the way refunds are already
-      bound.
+      What I'd build next is the rest of what the blind reviewer found: the
+      first-time payment link that LINK-001 doesn't yet check, and a real
+      review path for the one gap I left open.
     </p>
     <div class="show">
       <h3>Last frame</h3>
-      <p>The held-out tile. <strong>71.4%</strong> on screen while you say the
-      last sentence.</p>
+      <p>The findings table, three rows fixed, held on screen while you say
+      the last sentence — not the 71.4% tile alone.</p>
     </div>
   </div>
 </div>
@@ -421,7 +452,7 @@ footer { margin-top: 46px; padding-top: 18px; border-top: 3px solid var(--ink); 
 
 <script id="trace" type="application/json">
 {
- "generated": "2026-09-04 09:48",
+ "generated": "2026-09-05 19:54",
  "governed": [
   {
    "verdict": "allow",
@@ -540,19 +571,19 @@ footer { margin-top: 46px; padding-top: 18px; border-top: 3px solid var(--ink); 
  },
  "eval": {
   "block_rate": 1.0,
-  "blocked": 29,
-  "blocking_calls": 29,
-  "attack_total": 68,
+  "blocked": 31,
+  "blocking_calls": 31,
+  "attack_total": 73,
   "false_block_rate": 0.0,
   "benign_wrongly_blocked": 0,
-  "benign_total": 77,
+  "benign_total": 86,
   "holdout": {
    "correct": 15,
    "total": 21,
    "rate": 0.7142857142857143
   },
-  "p50": 2.3527999874204397,
-  "p95": 5.250699992757291,
+  "p50": 1.1420999981055502,
+  "p95": 2.076400000078138,
   "baseline": {
    "block_rate": 1.0,
    "false_block_rate": 1.0
@@ -620,8 +651,8 @@ footer { margin-top: 46px; padding-top: 18px; border-top: 3px solid var(--ink); 
   // beat gets -- so an over-long middle section is visible rather than felt.
   var beats = [["0:00", "The gap", 40], ["0:40", "Same agent, twice", 70],
                ["1:50", "Three ideas", 60], ["2:50", "Live", 50],
-               ["3:40", "The numbers", 45], ["4:25", "What broke", 45],
-               ["5:10", "The ceiling", 20]];
+               ["3:40", "The numbers", 45], ["4:25", "What I fixed", 40],
+               ["5:05", "What broke", 45], ["5:50", "The ceiling", 20]];
   $("budget").innerHTML = beats.map(function (b) {
     return '<div style="--w:' + b[2] + '"><b>' + b[0] + "</b>" + b[1] + "</div>";
   }).join("");

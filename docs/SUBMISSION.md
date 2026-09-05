@@ -75,7 +75,7 @@ tamper-evident audit trail.
 > that a compromised agent cannot exceed.
 
 ### Architecture decisions
-See `ARCHITECTURE.md` and `docs/DECISIONS.md` (21 ADRs). The three worth
+See `ARCHITECTURE.md` and `docs/DECISIONS.md` (24 ADRs). The three worth
 defending: the proxy holds the credential rather than observing the agent
 (ADR-001); undeclared operations are denied rather than inferred (ADR-002);
 policy is data rather than prompt text (ADR-003).

@@ -114,6 +114,9 @@ def test_every_rule_is_exercised_by_the_benign_corpus(fired):
         "SCOPE-002": "no unattended payouts in benign traffic",
         "DEST-001": "refunds to known customers",
         "TIME-001": "money at 08:00 and 20:59",
+        "CAP-003": "a mid-band refund that should be reviewable, not impossible",
+        "OWNER-001": "a refund to the customer who actually paid",
+        "LINK-001": "a resent link to the same destination",
     }
     uncovered = [r for r in _rules()
                  if r not in BASELINE_GRANTS and r not in seen and r not in shapes]

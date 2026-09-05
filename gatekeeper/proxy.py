@@ -88,6 +88,21 @@ class Gatekeeper:
         # See docs/DECISIONS.md ADR-019.
         self._lock = threading.Lock()
 
+        # H-02 and H-05 (sealed hold-out, ADR-022/ADR-024). Both are plain
+        # instance dictionaries, deliberately not persisted to the audit log
+        # or any schema: they exist only so the policy engine can be handed a
+        # boolean fact, and the policy engine stays free of I/O either way.
+        #
+        # The honest limit of this shape: it only knows what THIS PROCESS has
+        # itself seen. A payment captured, or a link cancelled, before this
+        # process started (or by a different process) leaves no record here,
+        # and the corresponding check below does not fire -- it fails open on
+        # the unverifiable case rather than blocking traffic it cannot reason
+        # about. DEST-001 and the amount caps still apply regardless.
+        self._payment_owner: dict[str, str] = {}       # payment_id -> customer
+        self._link_origin: dict[str, dict[str, Any]] = {}   # plink_id -> {destinations, amount_paise, customer}
+        self._recent_cancel: dict[str, dict[str, Any]] = {}  # "agent:customer" -> {destinations, amount_paise, ts}
+
     def close(self) -> None:
         """Release both SQLite handles.
 
@@ -153,12 +168,43 @@ class Gatekeeper:
         # 3. effect classification (None => undeclared => policy denies)
         effect = self.effects.classify(request.op)
 
+        # H-02: does this refund's payment_id belong, on this process's own
+        # record, to someone other than the customer it names? Unverifiable
+        # payment_ids (never captured through this proxy) are not flagged --
+        # see the comment on self._payment_owner in __init__.
+        owner_mismatch = False
+        true_owner = ""
+        if request.op == "create_refund":
+            pid = request.args.get("payment_id")
+            owner = self._payment_owner.get(pid) if isinstance(pid, str) else None
+            if owner is not None and request.counterparty is not None \
+                    and owner != request.counterparty:
+                owner_mismatch = True
+                true_owner = owner
+
+        # H-05: is this a payment link, for the same customer and the same
+        # amount as one just cancelled within the velocity window, pointed at
+        # a DIFFERENT destination? That is the cancel-and-reissue redirect the
+        # sealed hold-out demonstrated. A brand-new link with no prior
+        # cancellation to compare against is not flagged by this check --
+        # see ADR-024 for the honest scope of what this does and does not
+        # close.
+        relink_changed = False
+        if request.op == "create_payment_link" and request.counterparty is not None:
+            prior = self._recent_cancel.get(f"{cap.agent_id}:{request.counterparty}")
+            if prior and (now - prior["ts"]) <= self.policy.window_seconds \
+                    and request.amount_paise == prior["amount_paise"] \
+                    and tuple(request.counterparties) != prior["destinations"]:
+                relink_changed = True
+
         # 4. policy
         decision = self.policy.evaluate(
             request, effect,
             agent_id=cap.agent_id, ctx=self.audit,
             hour_local=datetime.fromtimestamp(now).hour,
             now=now,
+            owner_mismatch=owner_mismatch, true_owner=true_owner,
+            relink_destination_changed=relink_changed,
         )
         decision.latency_ms = (time.perf_counter() - t0) * 1000
 
@@ -261,6 +307,32 @@ class Gatekeeper:
                 )
                 return ActionResult(decision=decision, executed=False, audit_seq=seq, error=str(e))
             self.idem.put(key, cap.agent_id, request.op, result)
+
+            # H-02 / H-05 bookkeeping, only after a real execution. Recorded
+            # from what THIS request actually did, never from what a future
+            # request merely claims -- an agent cannot plant a false owner or
+            # a false cancellation record by asserting one in its own args.
+            if request.op == "capture_payment" and request.counterparty is not None:
+                pid = result.get("id") or request.args.get("payment_id")
+                if isinstance(pid, str):
+                    self._payment_owner[pid] = request.counterparty
+            elif request.op == "create_payment_link" and request.counterparty is not None:
+                lid = result.get("id")
+                if isinstance(lid, str):
+                    self._link_origin[lid] = {
+                        "destinations": tuple(request.counterparties),
+                        "amount_paise": request.amount_paise,
+                        "customer": request.counterparty,
+                    }
+            elif request.op == "cancel_payment_link":
+                lid = request.args.get("payment_link_id")
+                origin = self._link_origin.get(lid) if isinstance(lid, str) else None
+                if origin is not None:
+                    self._recent_cancel[f"{cap.agent_id}:{origin['customer']}"] = {
+                        "destinations": origin["destinations"],
+                        "amount_paise": origin["amount_paise"],
+                        "ts": now,
+                    }
 
         # 8. audit
         seq = self.audit.append(

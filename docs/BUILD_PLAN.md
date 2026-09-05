@@ -9,15 +9,15 @@ remains is verification, honesty, and packaging.
 
 - [x] Threat model written **before** feature code, 8 threats, explicit non-goals
 - [x] Effect registry with deny-by-default on undeclared operations
-- [x] Policy engine — 15 rules, 13 typed conditions, deny beats allow
+- [x] Policy engine — 18 rules, 15 typed conditions, deny beats allow
 - [x] Capability tokens; agent holds no credential; test enforces it
 - [x] The grant's own ceilings enforced, not just carried (ADR-014)
 - [x] Hash-chained audit log + independent `verify` CLI
 - [x] Content-addressed idempotency, checked before execution, under a lock
 - [x] Mock backend (Razorpay-shaped) and real test-mode backend
 - [x] Reference merchant + buyer agent, checkout end to end
-- [x] 53 eval scenarios / 145 calls across two corpora + deny-all baseline
-- [x] Unit tests, CI, Makefile, 21 ADRs, docs
+- [x] 59 eval scenarios / 159 calls across two corpora + deny-all baseline
+- [x] Unit tests, CI, Makefile, 24 ADRs, docs
 - [x] Ten real bugs found and written up — two by the eval during the build,
       three by a self-review, five by an adversarial review pass
 

@@ -59,6 +59,18 @@ class MockBackend:
                     "payment_id": args.get("payment_id"), "status": "processed"}
         if op == "create_payout":
             return {"id": self._id("pout"), "entity": "payout", "amount": amount, "status": "queued"}
+        if op == "cancel_payment_link":
+            # Missing until the H-05 fix needed to test a cancel followed by a
+            # real execution. cancel_payment_link fell through to the
+            # catch-all BackendError below, silently, on every single call --
+            # B4-02's benign scenario only asserts the VERDICT is "allow",
+            # which is computed at step 4 before the backend is ever reached,
+            # so a policy allow plus an execution failure still reads as
+            # "allow" and the scenario never noticed the cancel never
+            # actually ran. RazorpayBackend already implements this
+            # correctly; only the mock was missing it.
+            return {"id": args.get("payment_link_id", self._id("plink")),
+                    "entity": "payment_link", "status": "cancelled"}
         if op.startswith("fetch_"):
             return {"entity": op.replace("fetch_", ""), "count": 0, "items": []}
         raise BackendError(f"MockBackend has no implementation for {op!r}")

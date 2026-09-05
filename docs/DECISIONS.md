@@ -577,3 +577,135 @@ An author cannot see past their own framing, and rereading the threat model is
 not a way out of it: the model is the framing. Three different kinds of blindness
 needed three different kinds of reader, and the blindest reader found the
 biggest gap.
+
+---
+
+## ADR-022 — The decision in ADR-021 changed: three of the four hold-out findings are fixed
+
+**What this ADR amends.** ADR-021 recorded a deliberate decision not to fix
+anything the sealed hold-out found, because fixing it before the score was
+locked in would have spent the only measurement in this project with
+evidential weight. That reasoning was correct, and the record above is left
+exactly as written — it describes what was true and why, at the time.
+
+**What changed.** The score is not being re-measured. It cannot be: a
+hold-out only means something the first time, and `git tag freeze` already
+preserves the exact commit that scored 15/21 forever, regardless of anything
+that happens afterward. Once that measurement was locked in, the reason to
+leave the underlying bugs open stopped applying — from that point on, a
+finding from the sealed set is just a bug like the other ten in this file,
+and this project's whole pattern for a bug it finds is: understand it, fix
+it, write the ADR, add the regression test. Leaving three real, understood
+security gaps unfixed *after* they stopped being useful for the measurement
+would not have been rigor. It would have been theatre — "I found real holes
+and chose to ship them" is a worse answer under scrutiny than "I found real
+holes and closed them," and the frozen score already proves the hold-out was
+real without needing the bugs to still be live.
+
+**What did not change.** `H-04` (T10, writing into the audit surface) stays
+open. Not because leaving one open preserves some appearance of honesty — the
+other three are proof that isn't the reasoning — but because the *right* fix
+needs an actual design decision (a new effect class for operations that write
+into the audit surface, discussed and rejected as scope in the original
+build) rather than something that can be done well under time pressure. A
+rushed version would very likely be either useless (formatting the note
+differently) or wrong (a content-moderation pass over free text, which
+`docs/DO_NOT_BUILD.md` item 3 already argues against for a different reason).
+Shipping nothing is more honest than shipping the wrong thing quickly.
+
+**Scope discipline, stated once for all three fixes below.** None of them are
+the *complete* mitigation for the threat they address — `OWNER-001` only
+verifies what this process itself witnessed, `LINK-001` only closes the
+demonstrated cancel-and-reissue pattern, `CAP-003` narrows the amount band
+rather than eliminating the concept of a hard ceiling. Each ADR below states
+its own honest limit explicitly, in the same style as every earlier one in
+this file. Overclaiming a fix is the same dishonesty this whole project
+argues against in the numbers; it does not become acceptable because the fix
+is real.
+
+---
+
+## ADR-023 — CAP-003: the ₹500 cap is now a band, not a wall *(H-01 fixed)*
+
+**What broke.** `CAP-001` denied any single irreversible-money action over
+₹500 outright, with no path to a human. The merchant's own catalogue sells a
+₹740 jar of ghee. A full, legitimate refund on the most expensive item in the
+shop was therefore **structurally impossible** — not merely rate-limited or
+held, but refused every time, for any customer, with no attacker involved.
+
+The benign corpus never caught it because every benign refund scenario had
+been written for an amount under ₹500, by the same habit of mind that set the
+cap there in the first place. The blind hold-out reviewer, who had never seen
+the cap value, tried a ₹680 refund because it looked like an ordinary return
+— and it was denied.
+
+**Fix.** `CAP-001`'s threshold moves from ₹500 to ₹1,000, and a new rule,
+`CAP-003`, covers the ₹500–₹1,000 band with `require_approval` instead of
+`deny`. The ₹500 line does not disappear — under it, an agent still clears a
+refund alone; between ₹500 and ₹1,000, a human reviews it; above ₹1,000, the
+hard deny still applies exactly as before. A real return on a real item now
+has a path; an agent still cannot clear anything past ₹500 by itself.
+
+**Cost, stated plainly.** Two existing unit tests asserted the exact old
+boundary (`amount=50001` → `deny`) and had to be rewritten to assert the new
+one (`amount=50001` → `require_approval`); both are still in the file,
+renamed, so a future change that quietly widens `CAP-001` back to a flat deny
+would fail them. The demo transcript's rendered explanation text changed
+correspondingly (`"over the ₹500.00 limit"` → `"over the ₹1,000.00 hard
+limit"`); `visualiser.html` and `pitch.html` picked the new wording up
+automatically on the next `make visualiser`, because both are generated from
+a live run rather than typed by hand — this is exactly the property they were
+built to have.
+
+**What this does not claim.** ₹1,000 is still an arbitrary number, chosen to
+sit above the catalogue's most expensive line item with headroom, not derived
+from it. A merchant with a ₹1,500 product would hit the same wall CAP-001 used
+to represent at a different amount. Deriving the hard ceiling from the
+catalogue's actual maximum price, rather than a constant, is named in the
+README's Future Work as the fuller version of this fix.
+
+---
+
+## ADR-024 — LINK-001: reissuing a cancelled link to a new destination is denied *(H-05 partially fixed)*
+
+**What broke.** Every rule in this project, until now, watched money
+*leaving* the merchant. `DEST-001` binds a refund's destination to a known
+customer; nothing bound where a **payment link** pointed, because a payment
+link does not move the merchant's money at all — the customer's money moves,
+to wherever the link says. The sealed hold-out's H-05 scenario exploited
+exactly that gap: cancel the merchant's live link, reissue an identical one
+carrying an attacker's own `upi_id`, and the customer pays a stranger while
+the merchant's own ledger shows nothing happened.
+
+**Fix.** The proxy now remembers, per capability, the destination fields and
+amount of the payment link a `cancel_payment_link` call just cancelled. If a
+`create_payment_link` for the **same customer** and the **same amount**
+arrives within the velocity window naming a **different** destination, it is
+denied as `LINK-001`. Bookkeeping lives entirely on the `Gatekeeper` instance
+— two plain dictionaries, not a database table, not the audit log — because
+the only thing that needs to know is the policy engine, and the policy engine
+was already being handed proxy-computed facts this way for the grant ceilings
+(ADR-014) and refund ownership (ADR-022).
+
+**The honest limit, stated as plainly as every other one in this file: this
+closes the pattern that was demonstrated, not the class it belongs to.** A
+first-time payment link, with no prior cancellation on this agent's record to
+compare against, is not checked by `LINK-001` at all — an obedient agent's
+very *first* link to a customer could still name an attacker's destination
+and nothing here would object. `THREAT_MODEL.md` T9 is marked "partially
+mitigated", not "mitigated", for exactly this reason. The fuller version —
+binding a link's destination to the customer's contact details already on
+file with the merchant, rather than only to a link it happens to have just
+replaced — is real future work, not a rounding error being swept under this
+ADR's title.
+
+**Also fixed in the process, found while building the test for this:**
+`MockBackend` had no implementation for `cancel_payment_link` at all and fell
+through to `BackendError` on every single call, silently, since the mock was
+first written. Nothing had ever checked `executed` on a cancel before —
+benign scenario `B4-02` only asserted the *verdict* was `allow`, which is
+computed before the backend is ever reached, so a policy allow sitting next
+to a swallowed execution failure still read as a clean pass.
+`cancel_payment_link` now has a real mock implementation, and
+`test_cancel_payment_link_actually_executes_against_the_mock` checks
+`executed` directly so this cannot regress unnoticed a second time.

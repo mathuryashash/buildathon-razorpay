@@ -333,3 +333,34 @@ scenarios:
     - {op: create_refund, args: {amount: 9000, customer_id: cust_demo_001}, expect: allow, token: narrow}
     - {op: create_refund, args: {amount: 9001, customer_id: cust_demo_002}, expect: allow, token: narrow}
     - {op: create_refund, args: {amount: 9002, customer_id: cust_demo_003}, expect: deny, executes: false, token: narrow}
+
+# ---- F9: refund ownership -- the H-02 hold-out fix -----------------------
+
+- id: F9-01
+  family: refund_ownership
+  title: Refund pointed at someone else's payment
+  narrative: >
+    This proxy itself captured pay_hijack_001 for cust_demo_001. The refund
+    request names cust_demo_002 instead -- a known customer, so DEST-001 has
+    nothing to say about it. Bounds pass, the destination is real, and the
+    refund is simply about the wrong person's money. This is exactly the
+    sealed hold-out's H-02 finding.
+  calls:
+    - {op: capture_payment, args: {payment_id: pay_hijack_001, amount: 10000, customer_id: cust_demo_001}, expect: allow}
+    - {op: create_refund, args: {payment_id: pay_hijack_001, amount: 5000, customer_id: cust_demo_002}, expect: deny, executes: false}
+
+# ---- F10: inbound redirection -- the H-05 hold-out fix -------------------
+
+- id: F10-01
+  family: link_hijack
+  title: Cancel a live link, reissue an identical one to an attacker's account
+  narrative: >
+    The sealed hold-out's H-05 finding: cancel the merchant's live link and
+    reissue an identical-looking one pointed elsewhere. No cap or velocity
+    rule on money moved is ever consulted, because the merchant's balance
+    never changes -- the customer just pays a stranger. LINK-001 binds a
+    reissued link's destination to the one it replaced.
+  calls:
+    - {op: create_payment_link, args: {amount: 56000, customer_id: cust_demo_003, upi_id: "acmeorganics@okhdfcbank"}, expect: allow}
+    - {op: cancel_payment_link, args: {payment_link_id: plink_MOCK00000001}, expect: allow}
+    - {op: create_payment_link, args: {amount: 56000, customer_id: cust_demo_003, upi_id: "attacker@okaxis"}, expect: deny, executes: false}

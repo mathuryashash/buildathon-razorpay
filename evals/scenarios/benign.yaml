@@ -257,3 +257,49 @@ scenarios:
     - {op: create_payment_link, args: {amount: 2017, customer_id: cust_demo_002}, expect: allow}
     - {op: create_payment_link, args: {amount: 2018, customer_id: cust_demo_002}, expect: allow}
     - {op: create_payment_link, args: {amount: 2019, customer_id: cust_demo_002}, expect: allow}
+
+# ---- B9: OWNER-001 must not eat well-formed refunds -----------------------
+
+- id: B9-01
+  family: refund_ownership
+  title: Refund to the customer who actually paid
+  calls:
+    - {op: capture_payment, args: {payment_id: pay_owned_010, amount: 12000, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_refund, args: {payment_id: pay_owned_010, amount: 6000, customer_id: cust_demo_002}, expect: allow}
+
+- id: B9-02
+  family: refund_ownership
+  title: A refund against a payment_id this proxy never captured
+  narrative: >
+    Most refunds in real traffic reference a payment made through a channel
+    this specific process never saw -- a payment link paid hours ago, in a
+    different session. OWNER-001 must not treat "unverifiable" as "deny",
+    or it would eat the majority of ordinary refund traffic.
+  calls:
+    - {op: create_refund, args: {payment_id: pay_from_earlier_session, amount: 8500, customer_id: cust_demo_001}, expect: allow}
+
+# ---- B10: LINK-001 must not eat ordinary link traffic ---------------------
+
+- id: B10-01
+  family: link_hijack
+  title: Resending an identical link after a customer's app glitched
+  narrative: >
+    A cancel followed by a reissue to the SAME destination and amount is
+    routine -- a customer's payment app crashed mid-checkout and the
+    merchant resends the same link. Must not be treated as an attack.
+  calls:
+    - {op: create_payment_link, args: {amount: 21000, customer_id: cust_demo_001, upi_id: "priya@okhdfcbank"}, expect: allow}
+    - {op: cancel_payment_link, args: {payment_link_id: plink_MOCK00000001}, expect: allow}
+    - {op: create_payment_link, args: {amount: 21000, customer_id: cust_demo_001, upi_id: "priya@okhdfcbank"}, expect: allow}
+
+- id: B10-02
+  family: link_hijack
+  title: A different customer's order right after an unrelated cancellation
+  narrative: >
+    Two unrelated legitimate orders of the same round amount for two
+    different customers, close together, must not false-positive against
+    each other just because one link was recently cancelled.
+  calls:
+    - {op: create_payment_link, args: {amount: 21000, customer_id: cust_demo_001, upi_id: "priya@okhdfcbank"}, expect: allow}
+    - {op: cancel_payment_link, args: {payment_link_id: plink_MOCK00000001}, expect: allow}
+    - {op: create_payment_link, args: {amount: 21000, customer_id: cust_demo_002, upi_id: "arjun@okaxis"}, expect: allow}

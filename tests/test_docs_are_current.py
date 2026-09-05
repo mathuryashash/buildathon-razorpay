@@ -36,6 +36,21 @@ def _corpus(name: str) -> tuple[int, int]:
     return len(scen), sum(len(s["calls"]) for s in scen)
 
 
+def _attack_allow_calls() -> int:
+    """Calls in the attack corpus that must SUCCEED first.
+
+    A salami-slice is not an attack until the running total crosses the
+    ceiling, so its early calls carry `expect: allow`. The README quotes this
+    count directly ("N of M calls carry expect: allow") to explain why
+    verdict-match and block-rate are different numbers; it drifted once
+    already when the corpus grew and nothing was anchored to catch it.
+    """
+    raw = yaml.safe_load((ROOT / "evals/scenarios/attacks.yaml")
+                         .read_text(encoding="utf-8")) or {}
+    return sum(1 for s in raw.get("scenarios") or [] for c in s["calls"]
+               if c.get("expect") == "allow")
+
+
 def truth() -> dict[str, int]:
     a_s, a_c = _corpus("attacks")
     b_s, b_c = _corpus("benign")
@@ -47,6 +62,7 @@ def truth() -> dict[str, int]:
         "scenarios": a_s + b_s,
         "calls": a_c + b_c,
         "attack_calls": a_c,
+        "attack_allow_calls": _attack_allow_calls(),
         "benign_calls": b_c,
         "holdout_calls": h_c,
         "adrs": (ROOT / "docs/DECISIONS.md").read_text(encoding="utf-8").count("\n## ADR"),
@@ -81,6 +97,9 @@ CLAIMS: list[tuple[str, str, str]] = [
     ("README.md", r"\| `policies/default\.yaml` \| (\d+) rules", "rules"),
     ("README.md", r"\| `docs/DECISIONS\.md` \| (\d+) ADRs", "adrs"),
     ("README.md", r"Verdict match, whole attack corpus \| (\d+) / \d+", "attack_calls"),
+    ("README.md", r"\*\*False-block rate\*\* \(benign corpus\) \| \*\*0 / (\d+)", "benign_calls"),
+    ("README.md", r"(\d+) of its \d+ calls carry `expect: allow`", "attack_allow_calls"),
+    ("README.md", r"\d+ of its (\d+) calls carry `expect: allow`", "attack_calls"),
     ("docs/BUILD_PLAN.md", r"- \[x\] (\d+) eval scenarios", "scenarios"),
     ("docs/BUILD_PLAN.md", r"- \[x\] \d+ eval scenarios / (\d+) calls", "calls"),
     ("docs/BUILD_PLAN.md", r"- \[x\] Unit tests, CI, Makefile, (\d+) ADRs", "adrs"),
