@@ -132,8 +132,13 @@ def _act(gk: Gatekeeper, token: str, op: str, thought: str, **args) -> tuple[str
 def wait_for_payment(backend: RazorpayBackend, link_id: str, timeout_s: int) -> str | None:
     """Poll until somebody actually pays the link. Returns a payment id."""
     print(f"  Waiting up to {timeout_s // 60} minutes for the link to be paid.")
-    print("  Use any Razorpay test card, e.g. 4111 1111 1111 1111, any future")
-    print("  expiry, any CVV. Ctrl-C to skip the paid half of the demo.\n")
+    # 4111 1111 1111 1111 is the generic test Visa many gateways accept, but
+    # NOT one of Razorpay's own domestic BINs -- their checkout's client-side
+    # validator rejects it with "please enter a valid card number" before the
+    # request even goes anywhere. This one is Razorpay's own documented India
+    # test card (razorpay.com/docs/payments/payments/test-card-details).
+    print("  Use Razorpay's own India test card: 4100 2800 0000 1007, any")
+    print("  future expiry, any CVV. Ctrl-C to skip the paid half of the demo.\n")
     deadline = time.time() + timeout_s
     dots = 0
     while time.time() < deadline:

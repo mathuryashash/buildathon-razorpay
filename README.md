@@ -351,8 +351,11 @@ when it does not.
 **What `make live` actually does, and why it needs you for thirty seconds.**
 Test mode will not manufacture a paid payment, and a refund needs one behind
 it. So the run creates a real order and a real payment link, prints the
-`rzp.io` URL, and waits while you pay it with a test card
-(`4111 1111 1111 1111`, any future expiry, any CVV). Once Razorpay confirms
+`rzp.io` URL, and waits while you pay it with Razorpay's own India test card
+(`4100 2800 0000 1007`, any future expiry, any CVV — not the generic
+`4111 1111 1111 1111` many gateways accept; Razorpay's checkout validates
+against its own BIN list and rejects that one before the request even goes
+anywhere). Once Razorpay confirms
 the payment, the injected attack sequence runs **against a real, paid,
 captured payment** — so every refund it attempts is one that *would* have
 succeeded had the proxy allowed it. Blocking a refund that could not have
