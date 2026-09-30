@@ -428,7 +428,28 @@ def create_app(gk: Gatekeeper) -> FastAPI:
 
     @app.post("/v1/act")
     def act(body: ActionBody, authorization: str = Header(default="")):
-        res = gk.handle(_bearer(authorization), ActionRequest(**body.model_dump()))
+        request = ActionRequest(**body.model_dump())
+        if not authorization.startswith("Bearer "):
+            # A forged token reached handle() and was audited as AUTH-001; a
+            # MISSING token was rejected here and left no record at all, so the
+            # cheapest probe was the one that left no trace (found on the live
+            # run). Still a 401 -- the status code is unchanged -- but it is
+            # denied and audited through the same fail-closed path first.
+            with gk._lock:
+                try:
+                    gk._reject("unknown", request, None,
+                               "Blocked: no capability token was presented "
+                               "(expected 'Authorization: Bearer <token>').",
+                               "AUTH-001", ts=time.time())
+                except Exception:  # noqa: BLE001 -- the 401 below still denies
+                    try:
+                        gk._reject("unknown", request, None,
+                                   "Blocked: no capability token was presented.",
+                                   "AUTH-001", ts=time.time(), amount_paise=0)
+                    except Exception:  # noqa: BLE001
+                        pass  # audit store unusable; the request is still refused
+            _bearer(authorization)  # raises the 401
+        res = gk.handle(_bearer(authorization), request)
         return res.model_dump()
 
     @app.get("/v1/audit")

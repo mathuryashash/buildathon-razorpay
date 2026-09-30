@@ -71,6 +71,25 @@ def test_act_requires_a_bearer_token(gk):
     assert _client(gk).post("/v1/act", json={"op": "fetch_catalog"}).status_code == 401
 
 
+def test_an_act_with_no_bearer_token_is_still_audited(gk):
+    """Found on the live run against Razorpay test mode: a forged token was
+    denied AND recorded as AUTH-001, but a request carrying no token, or a
+    non-Bearer scheme, got its 401 straight out of the HTTP layer and never
+    reached the audit log. The cheapest probe an attacker can make was the
+    one probe that left no trace."""
+    c = _client(gk)
+    for headers in ({}, {"Authorization": "Token abc"}, {"Authorization": "Bearer"}):
+        r = c.post("/v1/act", json={"op": "create_refund", "args": {"amount": 100}},
+                   headers=headers)
+        assert r.status_code == 401, (headers, r.status_code)
+    rows = [dict(r) for r in gk.audit.rows()]
+    assert len(rows) == 3, rows
+    assert all(r["verdict"] == "deny" and r["executed"] == 0
+               and r["rule_ids"] == "AUTH-001" and r["op"] == "create_refund"
+               for r in rows), rows
+    assert gk.audit.verify().ok
+
+
 def test_a_non_ascii_token_is_denied_not_a_crash(gk):
     """Starlette decodes headers as latin-1 and `hmac.compare_digest` raises
     TypeError on a non-ASCII str, so one high byte in an Authorization header
