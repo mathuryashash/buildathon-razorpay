@@ -141,6 +141,11 @@ class Gatekeeper:
                     f"Blocked: the proxy could not evaluate this request "
                     f"({type(e).__name__}). Gatekeeper denies what it cannot decide.",
                     "INTERNAL-001", ts=now,
+                    # Record 0, not request.amount_paise: the amount is the
+                    # most likely thing that could not be evaluated, and a
+                    # fallback that re-raises on the same value turns a
+                    # fail-closed deny back into an unaudited 500.
+                    amount_paise=0,
                 )
 
     def _handle(self, token: str, request: ActionRequest, now: float) -> ActionResult:
@@ -191,11 +196,27 @@ class Gatekeeper:
         # close.
         relink_changed = False
         if request.op == "create_payment_link" and request.counterparty is not None:
-            prior = self._recent_cancel.get(f"{cap.agent_id}:{request.counterparty}")
-            if prior and (now - prior["ts"]) <= self.policy.window_seconds \
+            def _redirects(prior: dict[str, Any] | None) -> bool:
+                return bool(prior) and (now - prior["ts"]) <= self.policy.window_seconds \
                     and request.amount_paise == prior["amount_paise"] \
-                    and tuple(request.counterparties) != prior["destinations"]:
-                relink_changed = True
+                    and tuple(request.counterparties) != prior["destinations"]
+
+            if request.args.get("customer_id"):
+                relink_changed = _redirects(
+                    self._recent_cancel.get(f"{cap.agent_id}:{request.counterparty}"))
+            else:
+                # No customer_id: the lookup above keyed on whatever field came
+                # first (an attacker's upi_id), found no cancellation under
+                # that key, and let the reissue through. Simply omitting
+                # customer_id defeated LINK-001. A link naming no customer is
+                # compared against EVERY recent same-amount cancellation by
+                # this agent instead. A reissue that names a different known
+                # customer keeps the per-customer lookup, so two unrelated
+                # orders of the same amount (B10-02) are still unaffected.
+                prefix = f"{cap.agent_id}:"
+                relink_changed = any(
+                    _redirects(p) for k, p in self._recent_cancel.items()
+                    if k.startswith(prefix))
 
         # 4. policy
         decision = self.policy.evaluate(
@@ -347,7 +368,8 @@ class Gatekeeper:
         return ActionResult(decision=decision, executed=executed, audit_seq=seq, result=result)
 
     def _reject(self, agent_id: str, request: ActionRequest, effect, explanation: str,
-                rule_id: str, *, ts: float | None = None) -> ActionResult:
+                rule_id: str, *, ts: float | None = None,
+                amount_paise: int | None = None) -> ActionResult:
         # `ts` and `effect` are both threaded through deliberately. This used
         # to stamp the wall clock and write effect=None regardless of what it
         # was handed, so denials landed out of chronological order beside
@@ -357,7 +379,8 @@ class Gatekeeper:
         seq = self.audit.append(
             agent_id=agent_id, op=request.op,
             effect=effect.value if effect else None, verdict="deny",
-            amount_paise=request.amount_paise, counterparty=request.counterparty,
+            amount_paise=request.amount_paise if amount_paise is None else amount_paise,
+            counterparty=request.counterparty,
             rule_ids=[rule_id], explanation=explanation, executed=False,
             payload=request.args, ts=ts,
         )

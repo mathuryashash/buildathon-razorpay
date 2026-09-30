@@ -105,3 +105,14 @@ def test_healthz_needs_no_token_and_leaks_nothing(gk):
     body = _client(gk).get("/healthz").json()
     assert body["ok"] is True
     assert set(body) == {"ok", "backend", "rules", "operations"}
+
+
+def test_an_oversized_amount_is_a_recorded_denial_not_a_500(gk):
+    """Over HTTP this was a bare 500 with no audit record."""
+    c = _client(gk)
+    r = c.post("/v1/act", headers=_auth(ALL_OPS), json={
+        "op": "create_refund",
+        "args": {"amount": 10**26, "payment_id": "p", "customer_id": "cust_demo_001"}})
+    assert r.status_code == 200, r.text
+    assert r.json()["decision"]["verdict"] == "deny"
+    assert c.get("/v1/audit/verify", headers=_auth(READER)).json()["checked"] == 1

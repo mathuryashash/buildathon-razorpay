@@ -435,3 +435,99 @@ def test_cancel_payment_link_actually_executes_against_the_mock(gk, token):
     assert res.decision.verdict.value == "allow"
     assert res.executed, "cancel_payment_link did not actually execute"
     assert res.error is None
+
+
+# ---- QA loop regressions ---------------------------------------------------
+
+
+def test_an_amount_too_large_to_record_is_denied_and_audited(gk, token):
+    """An int above 2**63-1 parsed as a valid amount, then crashed the audit
+    write with OverflowError -- and crashed the INTERNAL-001 fallback the same
+    way, because it wrote the same amount. The exception escaped `handle` as a
+    bare, unaudited HTTP 500. It must be a recorded AMT-001 denial instead."""
+    for op, args in [
+        ("create_refund", {"amount": 10**30, "payment_id": "p", "customer_id": "cust_demo_001"}),
+        ("create_order", {"amount": 2**63}),
+        ("fetch_payment", {"amount": 10**30, "payment_id": "p"}),
+        ("create_refund", {"amount": "9" * 5000, "payment_id": "p",
+                           "customer_id": "cust_demo_001"}),
+    ]:
+        res = gk.handle(token, ActionRequest(op=op, args=args), now=BUSINESS_HOURS_TS)
+        assert res.decision.verdict.value == "deny", (op, res.decision.explanation)
+        assert not res.executed
+        assert "AMT-001" in [h.rule_id for h in res.decision.hits], res.decision.explanation
+    assert len(list(gk.audit.rows())) == 4
+    assert gk.audit.verify().ok
+
+
+def test_the_internal_error_fallback_cannot_itself_crash_on_the_amount(gk, token, monkeypatch):
+    """Belt and braces for the above: whatever raised inside `_handle`, the
+    fallback denial must still be written, so it must not re-read an amount
+    the audit log may be unable to store."""
+    def boom(*a, **k):
+        raise RuntimeError("policy exploded")
+    monkeypatch.setattr(gk.policy, "evaluate", boom)
+    monkeypatch.setattr(ActionRequest, "amount_paise", property(lambda self: 10**30))
+    res = gk.handle(token, ActionRequest(op="create_order", args={"amount": 1}),
+                    now=BUSINESS_HOURS_TS)
+    assert res.decision.verdict.value == "deny"
+    rows = list(gk.audit.rows())
+    assert len(rows) == 1 and rows[0]["rule_ids"] == "INTERNAL-001"
+
+
+def test_a_reissued_link_with_an_attacker_nested_customer_is_denied(gk, token):
+    """`payment_link_payload` forwards args["customer"] to Razorpay verbatim,
+    but only top-level destination keys were compared, so a reissue with the
+    same customer_id and an attacker's customer.email/contact looked
+    identical to the cancelled original and LINK-001 allowed it."""
+    r1 = gk.handle(token, ActionRequest(op="create_payment_link", args={
+        "amount": 56000, "customer_id": "cust_demo_003",
+        "customer": {"name": "Priya", "email": "priya@example.com"}}),
+        now=BUSINESS_HOURS_TS)
+    gk.handle(token, ActionRequest(
+        op="cancel_payment_link", args={"payment_link_id": r1.result["id"]}),
+        now=BUSINESS_HOURS_TS + 1)
+    r3 = gk.handle(token, ActionRequest(op="create_payment_link", args={
+        "amount": 56000, "customer_id": "cust_demo_003",
+        "customer": {"name": "Priya", "email": "billing@acme-payments.evil",
+                     "contact": "+919999999999"}}),
+        now=BUSINESS_HOURS_TS + 2)
+    assert r3.decision.verdict.value == "deny"
+    assert "LINK-001" in [h.rule_id for h in r3.decision.hits]
+
+
+def test_a_resent_link_with_the_same_nested_customer_is_still_allowed(gk, token):
+    args = {"amount": 21000, "customer_id": "cust_demo_001",
+            "customer": {"name": "Priya", "email": "priya@example.com"}}
+    r1 = gk.handle(token, ActionRequest(op="create_payment_link", args=args),
+                   now=BUSINESS_HOURS_TS)
+    gk.handle(token, ActionRequest(
+        op="cancel_payment_link", args={"payment_link_id": r1.result["id"]}),
+        now=BUSINESS_HOURS_TS + 1)
+    r3 = gk.handle(token, ActionRequest(op="create_payment_link", args=dict(args)),
+                   now=BUSINESS_HOURS_TS + 2)
+    assert r3.decision.verdict.value == "allow"
+
+
+def test_a_refund_with_an_attacker_nested_customer_email_is_denied(gk, token):
+    """DEST-001 must see a nested customer contact on a refund, too."""
+    assert act(gk, token, "create_refund", payment_id="p1", amount=100,
+               customer_id="cust_demo_001",
+               customer={"email": "attacker@evil.test"}) == "deny"
+
+
+def test_dropping_customer_id_does_not_dodge_the_relink_check(gk, token):
+    """The cancellation was keyed on the reissue's FIRST destination. Omit
+    customer_id and that is the attacker's upi_id, under which no
+    cancellation exists, so LINK-001 never fired."""
+    r1 = gk.handle(token, ActionRequest(op="create_payment_link", args={
+        "amount": 56000, "customer_id": "cust_demo_003", "upi_id": "acme@okhdfcbank"}),
+        now=BUSINESS_HOURS_TS)
+    gk.handle(token, ActionRequest(
+        op="cancel_payment_link", args={"payment_link_id": r1.result["id"]}),
+        now=BUSINESS_HOURS_TS + 1)
+    r3 = gk.handle(token, ActionRequest(op="create_payment_link", args={
+        "amount": 56000, "upi_id": "attacker@okaxis", "email": "x@evil.test"}),
+        now=BUSINESS_HOURS_TS + 2)
+    assert r3.decision.verdict.value == "deny"
+    assert "LINK-001" in [h.rule_id for h in r3.decision.hits]

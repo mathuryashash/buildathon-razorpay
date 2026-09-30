@@ -38,6 +38,17 @@ DESTINATION_FIELDS = (
     "fund_account_id", "vpa", "destination",
 )
 
+# Keys inside a nested `customer` object that route something to a person.
+# `backends.payment_link_payload` forwards `args["customer"]` to Razorpay
+# verbatim, so these reach the wire exactly like their top-level twins do.
+NESTED_CUSTOMER_DESTINATION_FIELDS = ("email", "contact")
+
+# The largest amount the proxy will read as a number at all. Beyond this the
+# value cannot be stored in the audit log (SQLite INTEGER is signed 64-bit),
+# and a "valid" amount the audit write then refuses is a request that neither
+# executes NOR leaves a record -- the one outcome the audit trail forbids.
+MAX_READABLE_PAISE = 2**63 - 1
+
 
 class ActionRequest(BaseModel):
     """What the agent is asking the proxy to do on its behalf."""
@@ -69,17 +80,26 @@ class ActionRequest(BaseModel):
         if isinstance(v, bool):
             return None          # bool is an int in Python. It is not an amount.
         if isinstance(v, int):
-            return v if v >= 0 else None
-        if isinstance(v, str):
+            n = v
+        elif isinstance(v, str):
             s = v.strip()
             # isascii() before isdigit(): str.isdigit() is True for characters
             # int() refuses ("²" is a digit to Python and a ValueError to
             # int()), and True for non-ASCII decimals that int() does accept
             # ("١٠٠" -> 100). The first crashed the proxy; the
             # second is un-normalised money input. Neither belongs in a
-            # payments field.
-            return int(s) if s.isascii() and s.isdigit() else None
-        return None              # float, None, list, dict -> unreadable
+            # payments field. The length guard keeps int() away from
+            # Python's 4,300-digit conversion limit, which raises.
+            if not (s.isascii() and s.isdigit()) or len(s) > 19:
+                return None
+            n = int(s)
+        else:
+            return None          # float, None, list, dict -> unreadable
+        # Negative, or too large to record: unreadable, so AMT-001 denies it.
+        # An int above 2**63-1 used to pass as valid, crash the audit write
+        # with OverflowError, crash the INTERNAL-001 fallback the same way,
+        # and surface as a bare, unaudited HTTP 500.
+        return n if 0 <= n <= MAX_READABLE_PAISE else None
 
     @property
     def amount_paise(self) -> int:
@@ -125,7 +145,19 @@ class ActionRequest(BaseModel):
         the agent got to choose which of its own fields was policed. Every
         destination present is now checked. See ADR-017.
         """
-        return [str(self.args[k]) for k in DESTINATION_FIELDS if self.args.get(k)]
+        out = [str(self.args[k]) for k in DESTINATION_FIELDS if self.args.get(k)]
+        # A nested `customer` object is a destination too. Payment links send
+        # it to Razorpay as-is, and it was invisible here: a cancelled link
+        # reissued with the same customer_id but an attacker's
+        # `customer.email` / `customer.contact` matched the original's
+        # destinations exactly and LINK-001 allowed it. Appended AFTER the
+        # top-level fields so `counterparty` (the first one) is unchanged.
+        cust = self.args.get("customer")
+        if isinstance(cust, dict):
+            out += [str(cust[k]) for k in NESTED_CUSTOMER_DESTINATION_FIELDS if cust.get(k)]
+        elif cust:
+            out.append(str(cust))    # not an object: unreadable, so policed as-is
+        return out
 
     @property
     def counterparty(self) -> str | None:
