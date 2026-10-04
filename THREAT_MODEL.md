@@ -139,6 +139,12 @@ amount-based rule off for exactly the requests that most deserve them.
 
 ---
 
+> **MCP red-team (docs/MCP_REDTEAM.md).** A 171-attack corpus run through the
+> MCP server found two more T1/T6 gaps, now closed by `SPLIT-001` (a refund on
+> a payment whose refund was just denied or held is itself held) and `DUP-001`
+> (an identical refund of the same payment under a fresh idempotency key is
+> held). It also re-confirmed the open half of T9 below.
+
 ### T9 — Inbound redirection *(found by the hold-out, PARTIALLY MITIGATED)*
 Every threat above concerns money *leaving* the merchant. An agent that can
 issue payment links controls money *arriving*: cancel the merchant's live link,

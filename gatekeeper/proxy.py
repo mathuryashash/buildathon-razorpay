@@ -32,7 +32,8 @@ from .effects import EffectRegistry
 from .idempotency import IdempotencyStore, derive_key
 from .models import ActionRequest, ActionResult, Decision, Effect, Verdict
 from .policy import PolicyEngine
-from .tokens import TokenError, verify as verify_token
+from .tokens import TokenError
+from .tokens import verify as verify_token
 
 
 class Gatekeeper:
@@ -115,7 +116,7 @@ class Gatekeeper:
         self.audit.close()
         self.idem.close()
 
-    def __enter__(self) -> "Gatekeeper":
+    def __enter__(self) -> Gatekeeper:
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -218,6 +219,21 @@ class Gatekeeper:
                     _redirects(p) for k, p in self._recent_cancel.items()
                     if k.startswith(prefix))
 
+        # RT-02 / RT-03 (MCP red-team): what has this agent already asked for
+        # against THIS payment_id inside the window? Read from the audit log,
+        # so unlike H-02/H-05 it survives a restart.
+        split_after_block = False
+        duplicate_refund = False
+        if request.op == "create_refund":
+            pid = request.args.get("payment_id")
+            if isinstance(pid, str) and pid:
+                hist = self.audit.refund_history(cap.agent_id, pid,
+                                                 self.policy.window_seconds, now=now)
+                split_after_block = any(h["verdict"] in ("deny", "require_approval")
+                                        for h in hist)
+                duplicate_refund = any(h["executed"] and h["amount_paise"] == request.amount_paise
+                                       for h in hist)
+
         # 4. policy
         decision = self.policy.evaluate(
             request, effect,
@@ -226,6 +242,8 @@ class Gatekeeper:
             now=now,
             owner_mismatch=owner_mismatch, true_owner=true_owner,
             relink_destination_changed=relink_changed,
+            refund_split_after_block=split_after_block,
+            duplicate_refund_same_payment=duplicate_refund,
         )
         decision.latency_ms = (time.perf_counter() - t0) * 1000
 
@@ -347,6 +365,10 @@ class Gatekeeper:
                     }
             elif request.op == "cancel_payment_link":
                 lid = request.args.get("payment_link_id")
+                if isinstance(lid, str):
+                    # RT-04: a cancelled link must not be replayed as the
+                    # answer to a later identical create.
+                    self.idem.forget_result(cap.agent_id, "create_payment_link", lid)
                 origin = self._link_origin.get(lid) if isinstance(lid, str) else None
                 if origin is not None:
                     self._recent_cancel[f"{cap.agent_id}:{origin['customer']}"] = {

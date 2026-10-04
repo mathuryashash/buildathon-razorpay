@@ -140,19 +140,19 @@ prompt.
 
 ## Results
 
-`make eval` -- 59 scenarios, 159 calls, deterministic, offline, reproducible.
+`make eval` -- 63 scenarios, 168 calls, deterministic, offline, reproducible.
 
 | Metric | Result |
 |---|---|
-| **Block rate** -- attack calls that must be stopped | **31 / 31 -- 100%** |
-| Verdict match, whole attack corpus | 73 / 73 -- 100% |
-| **False-block rate** (benign corpus) | **0 / 86 -- 0%** |
+| **Block rate** -- attack calls that must be stopped | **35 / 35 -- 100%** |
+| Verdict match, whole attack corpus | 78 / 78 -- 100% |
+| **False-block rate** (benign corpus) | **0 / 90 -- 0%** |
 | **Held-out set** (sealed, written blind, run once) | **15 / 21 -- 71.4%** |
 | Proxy overhead, end to end | **single-digit ms** — `make eval` prints the current run's p50/p95 |
 | Deny-everything baseline | block rate **100%**, false-block rate **100%** |
 
 **Two numbers for the attack corpus, because they are not the same number.**
-42 of its 73 calls carry `expect: allow` -- a salami-slice is not an attack
+43 of its 78 calls carry `expect: allow` -- a salami-slice is not an attack
 until the running total crosses the ceiling, so its first four refunds are
 supposed to succeed. *Verdict match* counts every call that did what the
 scenario said. *Block rate* counts only the calls that must be stopped, and is
@@ -615,6 +615,64 @@ readable by the merchant whose money it stops.
 
 ---
 
+## Using Gatekeeper over MCP
+
+`gatekeeper/mcp_server.py` exposes the proxy as an MCP server (official `mcp`
+Python SDK, `MCPServer`), over **stdio** or **streamable-http**. The MCP
+client -- Claude Desktop, Claude Code, any LLM host -- sees typed tools and
+nothing else: no Razorpay key, no signing secret, no capability token appears
+in any tool schema, argument or result. The server mints one scoped capability
+for the session and pushes every tool call through the same
+`Gatekeeper.handle()` path as `POST /v1/act`.
+
+| Tool | What it does | Result |
+|---|---|---|
+| `create_refund` | refund a payment (amount in paise) | `executed` / `pending_approval` / `denied` + `rule_id` |
+| `create_payment_link` | ask a customer to pay | same |
+| `cancel_payment_link` | cancel an unpaid link | same |
+| `fetch_payment` | read a payment | `executed` |
+| `check_budget` | remaining window spend, limits, token expiry | dict |
+| `list_my_decisions` | this agent's own audit rows + chain check | dict |
+
+A denial comes back with `isError: true` and the rule that fired
+(`{"status": "denied", "rule_id": "DEST-001", ...}`); a hold comes back as
+`{"status": "pending_approval", "rule_id": "CAP-003", "next_step": ...}` and is
+not an error. Arguments a tool does not declare are rejected, not ignored.
+
+**Claude Desktop** (`claude_desktop_config.json`) or **Claude Code** (`.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "gatekeeper": {
+      "command": "/path/to/repo/.venv/bin/python",
+      "args": ["-m", "gatekeeper.mcp_server"],
+      "env": {
+        "PYTHONPATH": "/path/to/repo",
+        "GATEKEEPER_MCP_BACKEND": "mock",
+        "GATEKEEPER_MCP_DB": "/path/to/repo/gatekeeper-mcp.db",
+        "GATEKEEPER_MCP_SCOPES": "create_refund,create_payment_link,cancel_payment_link,fetch_payment"
+      }
+    }
+  }
+}
+```
+
+Or from the CLI: `claude mcp add gatekeeper -- /path/to/repo/.venv/bin/python -m gatekeeper.mcp_server`.
+`GATEKEEPER_SIGNING_SECRET` (and, for `GATEKEEPER_MCP_BACKEND=razorpay|auto`,
+the `rzp_test_` key) are read from the repo's `.env` by the server process, so
+the client config never holds a secret. `--http --port 8765` serves
+streamable-http at `http://127.0.0.1:8765/mcp`.
+
+**Evidence.** `tests/test_mcp_stdio.py` spawns the server and drives it with
+the SDK client over stdio (allowed, denied, held, scoped and forged tokens,
+live-key refusal) and over streamable-http. `mcp_agent_demo.py` connects a real
+LLM (Groq `openai/gpt-oss-120b`) to the server over stdio; transcript in
+`mcp_agent_transcript.md`. `evals/mcp_redteam/` is a 171-attack / 102-benign
+scenario red-team suite run through the MCP layer and gated in
+`.github/workflows/redteam.yml`; findings, fixes (RT-01..RT-04, rules
+SPLIT-001 and DUP-001) and the open gaps are in `docs/MCP_REDTEAM.md`.
+
 ## Quickstart
 
 ```bash
@@ -666,8 +724,8 @@ has no business holding a production credential.
 | `gatekeeper/audit.py` | Hash-chained log + `verify`. |
 | `gatekeeper/tokens.py` | Capability tokens. The trust boundary lives here. |
 | `policies/effects.yaml` | Operation → effect class. Absent means denied. |
-| `policies/default.yaml` | 18 rules, each citing a threat. |
-| `evals/` | 59 scenarios / 159 calls across two corpora + the harness. |
+| `policies/default.yaml` | 20 rules, each citing a threat. |
+| `evals/` | 63 scenarios / 168 calls across two corpora + the harness. |
 | `visualiser.html` | The run above, step-through-able in a browser. Data baked in from a live run by `tools/build_visualiser.py`. |
 | `live.py` | The same argument against the real Razorpay test-mode API. `make preflight` first. |
 | `pitch.html` | A timed run sheet for the five-minute video: what to say, when, with what on screen. Figures injected from the same trace as the visualiser. |

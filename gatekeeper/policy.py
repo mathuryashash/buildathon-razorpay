@@ -18,9 +18,10 @@ docs/DO_NOT_BUILD.md, item 3.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 import yaml
 
@@ -81,6 +82,12 @@ class EvalFacts:
     # the velocity window, for the same customer and the same amount as one
     # just cancelled, but pointed at a different destination. See ADR-024.
     relink_destination_changed: bool = False
+    # RT-02 (MCP red-team): this agent already had a refund on THIS payment_id
+    # denied or held inside the window, and is now asking again.
+    refund_split_after_block: bool = False
+    # RT-03 (MCP red-team): an executed refund of exactly this amount on THIS
+    # payment_id already exists inside the window (fresh idempotency key).
+    duplicate_refund_same_payment: bool = False
 
 
 ConditionFn = Callable[[Any, EvalFacts], bool]
@@ -114,6 +121,8 @@ CONDITIONS: dict[str, ConditionFn] = {
     "amount_missing": lambda v, f: f.amount_missing is bool(v),
     "owner_mismatch": lambda v, f: f.owner_mismatch is bool(v),
     "relink_destination_changed": lambda v, f: f.relink_destination_changed is bool(v),
+    "refund_split_after_block": lambda v, f: f.refund_split_after_block is bool(v),
+    "duplicate_refund_same_payment": lambda v, f: f.duplicate_refund_same_payment is bool(v),
 }
 
 
@@ -164,7 +173,7 @@ class PolicyEngine:
         self.window_seconds = window_seconds
 
     @classmethod
-    def load(cls, path: Path | str | None = None) -> "PolicyEngine":
+    def load(cls, path: Path | str | None = None) -> PolicyEngine:
         p = Path(path) if path else DEFAULT_PATH
         raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
         rules = []
@@ -198,6 +207,8 @@ class PolicyEngine:
         owner_mismatch: bool = False,
         true_owner: str = "",
         relink_destination_changed: bool = False,
+        refund_split_after_block: bool = False,
+        duplicate_refund_same_payment: bool = False,
     ) -> Decision:
         cp = request.counterparty
         w = self.window_seconds
@@ -223,6 +234,8 @@ class PolicyEngine:
             owner_mismatch=owner_mismatch,
             true_owner=true_owner,
             relink_destination_changed=relink_destination_changed,
+            refund_split_after_block=refund_split_after_block,
+            duplicate_refund_same_payment=duplicate_refund_same_payment,
         )
 
         hits: list[RuleHit] = []

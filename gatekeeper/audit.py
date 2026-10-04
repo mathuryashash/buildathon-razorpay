@@ -14,9 +14,10 @@ import hashlib
 import json
 import sqlite3
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 GENESIS = "0" * 64
 
@@ -190,6 +191,36 @@ class AuditLog:
             for r in self._conn.execute(
                 "SELECT * FROM audit WHERE verdict='require_approval' ORDER BY seq ASC")
         ]
+
+    def refund_history(self, agent_id: str, payment_id: str, seconds: int, *,
+                       now: float) -> list[dict[str, Any]]:
+        """This agent's create_refund records against ONE payment_id in the window.
+
+        Denied/held rows store the raw args as payload; executed rows store
+        {"args": ..., "result_id": ...}. Both shapes are read. Used by SPLIT-001
+        and DUP-001 (MCP red-team findings RT-02 / RT-03).
+        """
+        rows = self._conn.execute(
+            "SELECT verdict, executed, amount_paise FROM audit "
+            "WHERE agent_id=? AND op='create_refund' AND ts > ? AND ts <= ? AND "
+            "COALESCE(json_extract(payload,'$.payment_id'), "
+            "         json_extract(payload,'$.args.payment_id')) = ?",
+            (agent_id, now - seconds, now, payment_id)).fetchall()
+        return [dict(r) for r in rows]
+
+    def rule_ids(self, seq: int) -> list[str]:
+        row = self._conn.execute("SELECT rule_ids FROM audit WHERE seq=?", (seq,)).fetchone()
+        return [r for r in (row["rule_ids"] if row else "").split(",") if r]
+
+    def recent_for_agent(self, agent_id: str, limit: int) -> list[dict[str, Any]]:
+        """One agent's own newest `limit` records, oldest first. No payloads."""
+        rows = self._conn.execute(
+            "SELECT seq, ts, op, verdict, amount_paise, counterparty, rule_ids, executed, "
+            "explanation FROM audit WHERE agent_id=? ORDER BY seq DESC LIMIT ?",
+            (agent_id, int(limit))).fetchall()
+        return [{**dict(r), "executed": bool(r["executed"]),
+                 "rule_ids": [x for x in r["rule_ids"].split(",") if x],
+                 "explanation": " ".join(r["explanation"].split())} for r in reversed(rows)]
 
     def verify(self) -> ChainCheck:
         """Walk the chain. Detects edits, reordering and gaps.

@@ -117,6 +117,8 @@ def test_every_rule_is_exercised_by_the_benign_corpus(fired):
         "CAP-003": "a mid-band refund that should be reviewable, not impossible",
         "OWNER-001": "a refund to the customer who actually paid",
         "LINK-001": "a resent link to the same destination",
+        "SPLIT-001": "refunds on payments with no prior hold (B11-01, B11-02)",
+        "DUP-001": "same-amount refunds on different payments, different amounts on one (B11)",
     }
     uncovered = [r for r in _rules()
                  if r not in BASELINE_GRANTS and r not in seen and r not in shapes]

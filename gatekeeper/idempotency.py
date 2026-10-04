@@ -49,6 +49,20 @@ class IdempotencyStore:
         row = self._conn.execute("SELECT result FROM idem WHERE key=?", (key,)).fetchone()
         return json.loads(row["result"]) if row else None
 
+    def forget_result(self, agent_id: str, op: str, result_id: str) -> int:
+        """Drop the cached result for an object that no longer exists.
+
+        Cancelling a payment link and then resending the identical link (the
+        benign "customer's app glitched" flow) used to REPLAY the cancelled
+        link's id instead of creating a new one: the agent was handed a dead
+        link and told it succeeded. MCP red-team finding RT-04.
+        """
+        cur = self._conn.execute(
+            "DELETE FROM idem WHERE agent_id=? AND op=? AND json_extract(result,'$.id')=?",
+            (agent_id, op, result_id))
+        self._conn.commit()
+        return cur.rowcount
+
     def put(self, key: str, agent_id: str, op: str, result: dict[str, Any]) -> None:
         self._conn.execute(
             "INSERT OR IGNORE INTO idem (key,agent_id,op,ts,result) VALUES (?,?,?,?,?)",

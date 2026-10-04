@@ -312,3 +312,40 @@ rules:
       Blocked: this payment link is for the same amount as one just
       cancelled for {counterparty}, but points somewhere different. A
       reissued link must go to the same place the original one did.
+
+  # ---- found by the MCP red-team suite (evals/mcp_redteam) ---------------
+
+  - id: SPLIT-001
+    threat: T1
+    description: >
+      A refund against a payment_id whose refund was denied or held for a
+      human in the last 10 minutes is itself held. Without this, an agent told
+      "Rs 900 needs approval" could issue two Rs 450 refunds on the same
+      payment and each one sailed under the Rs 500 auto limit -- the exact
+      "split it so no approval is needed" move a prompt injection asks for
+      (OWASP LLM06, excessive agency). MCP red-team finding RT-02,
+      docs/MCP_REDTEAM.md. Scoped to the SAME payment_id, so a held refund
+      never blocks refunds on other payments.
+    when:
+      refund_split_after_block: true
+    action: require_approval
+    explain: >-
+      Held for approval: a refund on this payment was just denied or held,
+      and splitting it into smaller refunds does not bypass that review.
+
+  - id: DUP-001
+    threat: T6
+    description: >
+      An executed refund of exactly this amount against this payment_id in
+      the last 10 minutes makes a second one a likely duplicate, even under a
+      fresh idempotency key. Idempotency is keyed on the request, and the
+      agent controls the key: a retry with a new key (or a one-character
+      change in a free-text note) paid the same refund twice. MCP red-team
+      finding RT-03. Held, not denied: two identical items returned on one
+      order is real, and a human can say yes.
+    when:
+      duplicate_refund_same_payment: true
+    action: require_approval
+    explain: >-
+      Held for approval: {amount} was already refunded on this payment in the
+      last 10 minutes. A second identical refund needs a human.

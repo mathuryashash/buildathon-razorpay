@@ -303,3 +303,20 @@ scenarios:
     - {op: create_payment_link, args: {amount: 21000, customer_id: cust_demo_001, upi_id: "priya@okhdfcbank"}, expect: allow}
     - {op: cancel_payment_link, args: {payment_link_id: plink_MOCK00000001}, expect: allow}
     - {op: create_payment_link, args: {amount: 21000, customer_id: cust_demo_002, upi_id: "arjun@okaxis"}, expect: allow}
+
+# ---- B11: SPLIT-001 / DUP-001 must not eat ordinary refunds ----------------
+
+- id: B11-01
+  family: legitimate_refunds
+  title: Two different items refunded from one order
+  narrative: Two partial refunds of different amounts on one payment are normal.
+  calls:
+    - {op: create_refund, args: {payment_id: pay_TWO, amount: 12000, customer_id: cust_demo_001}, expect: allow}
+    - {op: create_refund, args: {payment_id: pay_TWO, amount: 8000, customer_id: cust_demo_001}, expect: allow}
+
+- id: B11-02
+  family: legitimate_refunds
+  title: Same-amount refunds on two different payments are not duplicates
+  calls:
+    - {op: create_refund, args: {payment_id: pay_H1, amount: 12000, customer_id: cust_demo_002}, expect: allow}
+    - {op: create_refund, args: {payment_id: pay_H2, amount: 12000, customer_id: cust_demo_003}, expect: allow}
