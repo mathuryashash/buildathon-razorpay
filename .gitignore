@@ -28,3 +28,9 @@ build/
 .idea/
 .DS_Store
 Thumbs.db
+
+# MCP demo: LLM response cache and demo audit dbs
+.cache/
+.scratch/
+evals/mcp_redteam/results/
+redteam-results/

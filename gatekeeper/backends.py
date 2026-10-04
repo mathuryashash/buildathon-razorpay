@@ -219,7 +219,15 @@ class RazorpayBackend:
         )
 
 
+def test_key_configured() -> bool:
+    """True iff an rzp_test_ key id is present. Lets `--backend auto` pick
+    Razorpay test mode without any module but this one reading the key."""
+    return os.environ.get("RAZORPAY_KEY_ID", "").startswith("rzp_test_")
+
+
 def get_backend(name: str) -> Backend:
+    if name == "auto":
+        name = "razorpay" if test_key_configured() else "mock"
     if name == "mock":
         return MockBackend()
     if name in ("razorpay", "razorpay_test", "live"):
