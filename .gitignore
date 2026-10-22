@@ -34,3 +34,7 @@ Thumbs.db
 .scratch/
 evals/mcp_redteam/results/
 redteam-results/
+
+# SQLite WAL/shared-memory sidecars
+*.db-shm
+*.db-wal
