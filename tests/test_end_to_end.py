@@ -19,9 +19,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent.buyer import BuyerAgent
-from merchant.app import app as merchant_app
 from gatekeeper.proxy import create_app
 from gatekeeper.tokens import issue
+from merchant.app import app as merchant_app
 
 from .conftest import SECRET
 
@@ -149,10 +149,9 @@ def test_every_op_the_demo_allows_is_answerable_by_the_live_backend():
     from demo import AGENT_PLAN
     from gatekeeper.backends import NOT_IN_TEST_MODE, RazorpayBackend
     from gatekeeper.effects import EffectRegistry
-    from gatekeeper.policy import PolicyEngine
 
     source = inspect.getsource(RazorpayBackend.call)
-    engine, effects = PolicyEngine.load(), EffectRegistry.load()
+    effects = EffectRegistry.load()
 
     unanswerable = []
     for op in sorted({a.op for a in AGENT_PLAN}):

@@ -1,6 +1,8 @@
 import pytest
+
 from gatekeeper.models import ActionRequest
 from gatekeeper.tokens import TokenError, issue, verify
+
 from .conftest import BUSINESS_HOURS_TS, SECRET
 
 
@@ -72,7 +74,7 @@ def test_grant_window_cap_binds_below_merchant_policy(gk):
     tok = _narrow(max_action_paise=10_000, max_window_paise=25_000)
     for i in range(2):
         assert _act(gk, tok, "create_refund", offset=i,
-                    amount=9000 + i, customer_id="cust_demo_00%d" % (i + 1)
+                    amount=9000 + i, customer_id=f"cust_demo_00{i + 1}"
                     ).decision.verdict.value == "allow"
     res = _act(gk, tok, "create_refund", offset=2, amount=9002,
                customer_id="cust_demo_003")

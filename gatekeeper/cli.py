@@ -59,10 +59,10 @@ def main(argv: list[str] | None = None) -> int:
     ap_.add_argument("--db", default="gatekeeper.db")
     ap_.add_argument("--json", action="store_true")
 
-    l = sub.add_parser("log", help="print the audit trail")
-    l.add_argument("--db", default="gatekeeper.db")
-    l.add_argument("--limit", type=int, default=30)
-    l.add_argument("--json", action="store_true")
+    log_p = sub.add_parser("log", help="print the audit trail")
+    log_p.add_argument("--db", default="gatekeeper.db")
+    log_p.add_argument("--limit", type=int, default=30)
+    log_p.add_argument("--json", action="store_true")
 
     a = ap.parse_args(argv)
 

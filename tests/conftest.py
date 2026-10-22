@@ -2,6 +2,7 @@ import tempfile
 from datetime import datetime
 
 import pytest
+
 from gatekeeper.backends import MockBackend
 from gatekeeper.proxy import Gatekeeper
 from gatekeeper.tokens import issue

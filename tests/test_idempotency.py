@@ -6,8 +6,9 @@ from .conftest import BUSINESS_HOURS_TS as T
 
 
 def test_retry_storm_executes_exactly_once(gk, token):
-    req = lambda: ActionRequest(op="create_payment_link",
-                                args={"amount": 12000, "customer_id": "cust_demo_001"})
+    def req():
+        return ActionRequest(op="create_payment_link",
+                             args={"amount": 12000, "customer_id": "cust_demo_001"})
     results = [gk.handle(token, req(), now=T) for _ in range(20)]
     executed = [r for r in results if r.executed]
     assert len(executed) == 1, "a retry storm must not create 20 payment links"

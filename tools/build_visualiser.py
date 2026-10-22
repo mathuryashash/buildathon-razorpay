@@ -36,14 +36,19 @@ sys.path.insert(0, str(ROOT))
 
 import yaml  # noqa: E402
 
-from demo import (ACT_TITLES, AGENT_PLAN, MOVES_MONEY, SECRET,  # noqa: E402
-                  timestamp_for, tokens_for)
+from demo import (  # noqa: E402
+    ACT_TITLES,
+    AGENT_PLAN,
+    MOVES_MONEY,
+    SECRET,
+    timestamp_for,
+    tokens_for,
+)
 from gatekeeper.audit import AuditLog  # noqa: E402
 from gatekeeper.backends import MockBackend  # noqa: E402
 from gatekeeper.console import use_utf8_stdout  # noqa: E402
 from gatekeeper.models import ActionRequest  # noqa: E402
 from gatekeeper.proxy import Gatekeeper  # noqa: E402
-
 
 # Which lifecycle stage actually decided. Derived from the rule ids the proxy
 # records rather than from a new field, so the page cannot claim a stage the
