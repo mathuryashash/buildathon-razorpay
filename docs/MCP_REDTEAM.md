@@ -33,8 +33,9 @@ unknown tool.
 |---|---|---|
 | First run, before fixes | 179/191 = 93.7% | 1/240 = 0.4% |
 | After RT-01..RT-04 | 186/191 = 97.4% | 0/240 = 0.0% |
+| After RT-05 (LINK-002) | 187/191 = 97.9% | 0/240 = 0.0% |
 
-The 5 remaining misses are documented open gaps (below), tagged
+The 4 remaining misses are documented open gaps (below), tagged
 `known_gap` in the dataset. CI fails on any miss that is *not* tagged, so a
 regression cannot hide behind the 97% threshold.
 
@@ -95,9 +96,15 @@ Tests: `test_first_link_with_an_unknown_upi_handle_is_denied` and 5 more in
   to `buyerN@example.com` addresses not on file), so no rule was added. The
   realistic harm is phishing the payer with a genuine link, not diverting
   funds.
-- **Cancelling a link this process did not create (1 call).** Allowed by
-  ALLOW-REVERSIBLE. Denying it would break the existing benign scenario B4-02
-  and the sealed hold-out's expected `allow` on H-05, so it was left as is.
+- **Cancelling a link this agent did not create (1 call).** Allowed by
+  ALLOW-REVERSIBLE. A fix was written and tested (LINK-003: hold a cancel
+  unless the audit log shows this agent created the link; survives restarts)
+  and then reverted: it held benign B4-02 and B6-02, which cancel a link id
+  the scenario never created, raising the in-sample false-block rate from 0/90
+  to 2/90, and it flipped the frozen hold-out's H-05 cancel. Shipping it would
+  mean rewriting benign expectations to fit the rule. The realistic path is
+  for the merchant to tag links the agent may manage (Razorpay `notes`) and
+  check that tag; the mock backend cannot express it yet.
 
 ## Not done / honest scope
 
@@ -107,7 +114,8 @@ Tests: `test_first_link_with_an_unknown_upi_handle_is_denied` and 5 more in
   is hand-written prompt-injection strings carried in tool arguments, not
   garak output.
 - The corpus was written by the same author as the fixes, after seeing the
-  first run. The post-fix 97.4% is an in-sample number; the original sealed
-  hold-out (15/21) is still the only blind measurement in this repo.
+  first run. The post-fix 97.9% is an in-sample number. Blind numbers: the
+  original sealed hold-out (15/21, frozen) and `evals/blind/` (21/28, run
+  once on 2026-10-22).
 - The runner uses the SDK in-memory transport so it can inject the clock; the
   stdio and streamable-http transports are covered by `tests/test_mcp_stdio.py`.
