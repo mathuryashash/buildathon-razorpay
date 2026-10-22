@@ -88,6 +88,23 @@ class EvalFacts:
     # RT-03 (MCP red-team): an executed refund of exactly this amount on THIS
     # payment_id already exists inside the window (fresh idempotency key).
     duplicate_refund_same_payment: bool = False
+    # RT-05 (MCP red-team, T9): the collect-to UPI handle on a payment link and
+    # the customer it names. Read by `upi_not_on_file`.
+    link_upi_id: str | None = None
+    link_customer: str | None = None
+
+
+def _upi_not_on_file(v: Any, f: EvalFacts) -> bool:
+    """True when a request names a UPI handle that is neither the merchant's
+    nor on file for the customer the request names. No handle -> False.
+    Comparison is case-insensitive (UPI handles are) and otherwise exact, so a
+    zero-width or homoglyph variant of a real handle is not on file."""
+    if not f.link_upi_id:
+        return False
+    upi = f.link_upi_id.strip().lower()
+    allowed = {str(x).lower() for x in v.get("merchant") or []}
+    allowed |= {str(x).lower() for x in (v.get("customers") or {}).get(f.link_customer) or []}
+    return upi not in allowed
 
 
 ConditionFn = Callable[[Any, EvalFacts], bool]
@@ -123,6 +140,7 @@ CONDITIONS: dict[str, ConditionFn] = {
     "relink_destination_changed": lambda v, f: f.relink_destination_changed is bool(v),
     "refund_split_after_block": lambda v, f: f.refund_split_after_block is bool(v),
     "duplicate_refund_same_payment": lambda v, f: f.duplicate_refund_same_payment is bool(v),
+    "upi_not_on_file": _upi_not_on_file,
 }
 
 
@@ -236,6 +254,9 @@ class PolicyEngine:
             relink_destination_changed=relink_destination_changed,
             refund_split_after_block=refund_split_after_block,
             duplicate_refund_same_payment=duplicate_refund_same_payment,
+            link_upi_id=(str(request.args["upi_id"]) if request.args.get("upi_id") else None),
+            link_customer=(str(request.args["customer_id"])
+                           if request.args.get("customer_id") else None),
         )
 
         hits: list[RuleHit] = []

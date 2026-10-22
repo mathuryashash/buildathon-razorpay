@@ -1,6 +1,6 @@
 import pytest
-from gatekeeper.models import ActionRequest
 
+from gatekeeper.models import ActionRequest
 
 from .conftest import BUSINESS_HOURS_TS
 
@@ -106,7 +106,7 @@ def test_payment_count_limit_counts_payments_not_every_action(gk, token):
         assert act(gk, token, "create_order", _t=BUSINESS_HOURS_TS + i, amount=1000) == "allow"
     for i in range(4):
         assert act(gk, token, "create_refund", _t=BUSINESS_HOURS_TS + 10 + i,
-                   amount=1000 + i, customer_id="cust_demo_00%d" % (i % 3 + 1)) == "allow"
+                   amount=1000 + i, customer_id=f"cust_demo_00{i % 3 + 1}") == "allow"
 
 
 def test_velocity_uses_the_injected_clock_not_the_wall_clock(gk):
@@ -136,7 +136,7 @@ def test_velocity_uses_the_injected_clock_not_the_wall_clock(gk):
     # crosses the Rs 2,000 window ceiling on the fifth.
     verdicts = [
         act(gk, tok, "create_refund", _t=past + i * 5,
-            amount=49000 + i, customer_id="cust_demo_00%d" % (i % 3 + 1))
+            amount=49000 + i, customer_id=f"cust_demo_00{i % 3 + 1}")
         for i in range(5)
     ]
     assert verdicts == ["allow"] * 4 + ["deny"], verdicts
@@ -409,14 +409,16 @@ def test_a_different_customer_after_a_cancellation_is_unaffected(gk, token):
     assert r3.decision.verdict.value == "allow"
 
 
-def test_a_first_time_link_with_no_prior_cancellation_is_unaffected(gk, token):
-    """The honest limit of LINK-001: a brand-new link has nothing to compare
-    against, so an attacker-controlled destination on a FIRST link is not
-    caught by this rule. Named plainly rather than discovered later."""
+def test_a_first_time_link_is_not_a_relink(gk, token):
+    """LINK-001 alone cannot see a FIRST link: there is nothing to compare
+    against. That used to let an attacker's upi_id through; LINK-002 (handle
+    must be on file) now denies it, and LINK-001 correctly stays silent."""
     res = gk.handle(token, ActionRequest(op="create_payment_link", args={
         "amount": 56000, "customer_id": "cust_demo_003", "upi_id": "attacker@okaxis"}),
         now=BUSINESS_HOURS_TS)
-    assert res.decision.verdict.value == "allow"
+    rules = [h.rule_id for h in res.decision.hits]
+    assert "LINK-001" not in rules
+    assert res.decision.verdict.value == "deny" and "LINK-002" in rules
 
 
 def test_cancel_payment_link_actually_executes_against_the_mock(gk, token):
@@ -521,7 +523,7 @@ def test_dropping_customer_id_does_not_dodge_the_relink_check(gk, token):
     customer_id and that is the attacker's upi_id, under which no
     cancellation exists, so LINK-001 never fired."""
     r1 = gk.handle(token, ActionRequest(op="create_payment_link", args={
-        "amount": 56000, "customer_id": "cust_demo_003", "upi_id": "acme@okhdfcbank"}),
+        "amount": 56000, "customer_id": "cust_demo_003", "upi_id": "acmeorganics@okhdfcbank"}),
         now=BUSINESS_HOURS_TS)
     gk.handle(token, ActionRequest(
         op="cancel_payment_link", args={"payment_link_id": r1.result["id"]}),

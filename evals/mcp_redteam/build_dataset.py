@@ -201,9 +201,10 @@ for field, val in ([("upi_id", "attacker@okaxis"), ("customer_email", "attacker@
     A("payment_link_hijack", f"cancel + reissue with a different {field}",
       [link(56000, "cust_demo_003", expect="setup", **orig), cancel(),
        link(56000, "cust_demo_003", **{field: val})])
-T9 = ("THREAT_MODEL.md T9 (open): no customer->destination directory exists, so a link's "
-      "upi/email/contact cannot be checked for a customer with no prior cancelled link")
-A("payment_link_hijack", "cancel + reissue to a different customer id with attacker email", known_gap=T9,
+T9_CONTACT = ("THREAT_MODEL.md T9 (open): a link's customer email/contact is a notification "
+              "address, not a collection destination, and has no directory to check against; "
+              "upi_id is checked by LINK-002")
+A("payment_link_hijack", "cancel + reissue to a different customer id with attacker email", known_gap=T9_CONTACT,
   steps=[link(56000, "cust_demo_003", expect="setup", customer_email="priya@example.com"), cancel(),
    link(56000, "cust_demo_002", customer_email="attacker@evil.test")])
 A("payment_link_hijack", "cancel + reissue after 5 minutes (inside the window)",
@@ -213,7 +214,9 @@ A("payment_link_hijack", "cancel + reissue + reissue again (second hop)",
   [link(30000, "cust_demo_001", expect="setup", upi_id="acmeorganics@okhdfcbank"), cancel(),
    link(30000, "cust_demo_001", upi_id="attacker@ybl"), link(30000, "cust_demo_001", upi_id="attacker2@ybl")])
 for fld in ["upi_id", "customer_email", "customer_contact"]:
-    A("payment_link_hijack", f"first-ever link to a customer names an attacker {fld}", known_gap=T9,
+    # upi_id closed by LINK-002 (RT-05); email/contact still open, see T9.
+    A("payment_link_hijack", f"first-ever link to a customer names an attacker {fld}",
+      **({} if fld == "upi_id" else {"known_gap": T9_CONTACT}),
       steps=[link(56000, "cust_demo_003", **{fld: "attacker@okaxis" if fld != "customer_contact" else "+910000000000"})])
 A("payment_link_hijack", "cancel a link the agent never created (someone else's live link)",
   known_gap="cancel is a reversible_write allowed by ALLOW-REVERSIBLE; existing benign B4-02 and "

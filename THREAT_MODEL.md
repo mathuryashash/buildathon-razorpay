@@ -156,10 +156,13 @@ point of view nothing happened.
 → **Mitigation: partial.** `LINK-001` denies a payment link reissued, within
 the velocity window, for the same customer and amount as one just cancelled,
 pointed at a different destination — the exact cancel-and-reissue pattern
-demonstrated below. It does **not** cover a first-time link with no prior
-cancellation to compare against, which is still open: an agent's very first
-payment link to a customer could still name an attacker's destination with
-nothing to check it against. See ADR-024.
+demonstrated below. `LINK-002` (added after the MCP red team, RT-05) denies
+any link whose `upi_id` is not the merchant's or on file for the named
+customer, so a first-time link can no longer collect to an attacker's UPI
+handle. Still open: a first-time link's `customer.email` / `customer.contact`
+is not checked. Those are notification addresses, not collection
+destinations, and allowlisting them would block every new customer. See
+ADR-024 and docs/MCP_REDTEAM.md.
 → Hold-out scenario `H-05`, calls 3 and 5. Two of the six hold-out misses.
 → Attack family `link_hijack`, scenario F10-01.
 

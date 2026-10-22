@@ -724,7 +724,7 @@ has no business holding a production credential.
 | `gatekeeper/audit.py` | Hash-chained log + `verify`. |
 | `gatekeeper/tokens.py` | Capability tokens. The trust boundary lives here. |
 | `policies/effects.yaml` | Operation → effect class. Absent means denied. |
-| `policies/default.yaml` | 20 rules, each citing a threat. |
+| `policies/default.yaml` | 21 rules, each citing a threat. |
 | `evals/` | 63 scenarios / 168 calls across two corpora + the harness. |
 | `visualiser.html` | The run above, step-through-able in a browser. Data baked in from a live run by `tools/build_visualiser.py`. |
 | `live.py` | The same argument against the real Razorpay test-mode API. `make preflight` first. |

@@ -74,13 +74,27 @@ Fix: a successful `cancel_payment_link` evicts that link's cached create
 result (`IdempotencyStore.forget_result`). A plain retry of a live link is
 still a replay.
 
+**RT-05 -- first-ever link collecting to an attacker's UPI handle (new rule LINK-002, T9).**
+LINK-001 only compares a reissue with a cancelled original, so a customer's
+first link could name any `upi_id`. Fix: `upi_id` on a payment link must be the
+merchant's handle or one on file for the customer the link names (listed in
+`policies/default.yaml`). Case-insensitive, otherwise exact, so a homoglyph or
+zero-width variant fails. Links with no `upi_id`, and links to handles on file
+(benign B-payment_link-19..23, B-link_lifecycle-01/02), are unaffected.
+Tests: `test_first_link_with_an_unknown_upi_handle_is_denied` and 5 more in
+`tests/test_mcp_redteam_fixes.py`, seen failing before the rule was added.
+
 ## Open gaps (not fixed; tagged `known_gap`)
 
-- **T9 first-time link destination (4 calls).** A payment link whose
-  `upi_id` / `customer.email` / `customer.contact` names an attacker, for a
-  customer with no recently cancelled link, executes. There is no
-  customer -> destination directory to check it against. THREAT_MODEL.md T9
-  already lists this as open; the red team re-confirmed it.
+- **T9 link customer email/contact (3 calls).** A payment link whose
+  `customer.email` / `customer.contact` names an attacker, with no recently
+  cancelled link to compare against, executes. These fields are where
+  Razorpay *notifies* the payer, not where money is collected (that is
+  `upi_id`, now checked by LINK-002). An allowlist of payer emails would block
+  every new customer and every guest checkout (the benign corpus sends links
+  to `buyerN@example.com` addresses not on file), so no rule was added. The
+  realistic harm is phishing the payer with a genuine link, not diverting
+  funds.
 - **Cancelling a link this process did not create (1 call).** Allowed by
   ALLOW-REVERSIBLE. Denying it would break the existing benign scenario B4-02
   and the sealed hold-out's expected `allow` on H-05, so it was left as is.

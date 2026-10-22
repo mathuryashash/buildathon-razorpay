@@ -313,6 +313,32 @@ rules:
       cancelled for {counterparty}, but points somewhere different. A
       reissued link must go to the same place the original one did.
 
+  - id: LINK-002
+    threat: T9
+    description: >
+      A payment link may only collect to a UPI handle on file: the merchant's
+      own, or one registered for the customer the link names. LINK-001 only
+      compared a reissue with a cancelled original, so an agent's FIRST link
+      to a customer could name any handle (MCP red-team RT-05, the open half
+      of T9). Matching is case-insensitive and otherwise exact, so a
+      look-alike handle (acme0rganics@..., a zero-width space) is not on file.
+      A link with no upi_id is unaffected. The handles live here, in policy,
+      because they are merchant data a reviewer must be able to read.
+      Not covered: customer email/contact on a link; see THREAT_MODEL.md T9.
+    when:
+      op_in: [create_payment_link]
+      upi_not_on_file:
+        merchant: ["acmeorganics@okhdfcbank"]
+        customers:
+          cust_demo_001: ["priya@okhdfcbank"]
+          cust_demo_002: ["arjun@okaxis"]
+          cust_demo_003: ["meera@ybl"]
+    action: deny
+    explain: >-
+      Blocked: this payment link collects to a UPI handle that is not on file
+      for the merchant or for {counterparty}. A link can only collect to a
+      handle the merchant has registered.
+
   # ---- found by the MCP red-team suite (evals/mcp_redteam) ---------------
 
   - id: SPLIT-001

@@ -107,3 +107,52 @@ def test_mcp_rejects_an_undeclared_destination_argument(gk, token):
     assert res.is_error
     assert "upi_id" in res.content[0].text
     assert not any(r["op"] == "create_refund" and r["executed"] for r in gk.audit.rows())
+
+
+# ---- RT-05: first-ever link names an attacker's UPI handle (T9, known_gap) --
+#
+# A payment link's upi_id is where the money is collected. LINK-001 only
+# compared a reissue with a cancelled original, so a FIRST link to a known
+# customer could carry any handle. LINK-002 checks it against the handles on
+# file in policies/default.yaml: the merchant's own, plus that customer's.
+
+def _link(gk, token, now=T, **args):
+    return gk.handle(token, ActionRequest(op="create_payment_link", args=args), now=now)
+
+
+def test_first_link_with_an_unknown_upi_handle_is_denied(gk, token):
+    res = _link(gk, token, amount=56_000, customer_id="cust_demo_003", upi_id="attacker@okaxis")
+    assert not res.executed
+    assert res.decision.verdict.value == "deny"
+    assert "LINK-002" in [h.rule_id for h in res.decision.hits]
+
+
+def test_a_typosquatted_merchant_handle_is_denied(gk, token):
+    res = _link(gk, token, amount=56_000, customer_id="cust_demo_003",
+                upi_id="acme0rganics@okhdfcbank")
+    assert not res.executed and "LINK-002" in [h.rule_id for h in res.decision.hits]
+
+
+def test_another_customers_handle_on_a_link_is_denied(gk, token):
+    res = _link(gk, token, amount=21_000, customer_id="cust_demo_001", upi_id="arjun@okaxis")
+    assert not res.executed and "LINK-002" in [h.rule_id for h in res.decision.hits]
+
+
+def test_a_link_with_no_customer_and_an_unknown_handle_is_denied(gk, token):
+    res = _link(gk, token, amount=21_000, upi_id="attacker@okaxis")
+    assert not res.executed
+
+
+def test_links_with_handles_on_file_are_allowed(gk, token):
+    assert _link(gk, token, amount=18_000, customer_id="cust_demo_001",
+                 upi_id="priya@okhdfcbank").executed
+    assert _link(gk, token, amount=18_050, customer_id="cust_demo_002",
+                 upi_id="arjun@okaxis", now=T + 5).executed
+    assert _link(gk, token, amount=18_100, customer_id="cust_demo_003",
+                 upi_id="meera@ybl", now=T + 10).executed
+    assert _link(gk, token, amount=56_000, customer_id="cust_demo_003",
+                 upi_id="acmeorganics@okhdfcbank", now=T + 15).executed
+
+
+def test_a_link_with_no_upi_handle_is_unaffected(gk, token):
+    assert _link(gk, token, amount=21_000, customer_id="cust_demo_001").executed
