@@ -31,8 +31,7 @@ from .effects import EffectRegistry
 from .idempotency import IdempotencyStore, derive_key
 from .models import ActionRequest, ActionResult, Decision, Effect, Verdict
 from .policy import PolicyEngine
-from .tokens import TokenError
-from .tokens import verify as verify_token
+from .tokens import TokenError, verify as verify_token
 
 
 class Gatekeeper:
