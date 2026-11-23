@@ -24,7 +24,6 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel
 
 from .audit import AuditLog
 from .backends import Backend, BackendError
@@ -409,14 +408,6 @@ class Gatekeeper:
         return ActionResult(decision=d, executed=False, audit_seq=seq)
 
 
-# ---------------------------------------------------------------- HTTP ----
-
-class ActionBody(BaseModel):
-    op: str
-    args: dict[str, Any] = {}
-    idempotency_key: str | None = None
-
-
 READ_AUDIT_SCOPE = "read_audit"
 
 
@@ -449,8 +440,7 @@ def create_app(gk: Gatekeeper) -> FastAPI:
                 403, f"this capability does not carry the '{READ_AUDIT_SCOPE}' scope")
 
     @app.post("/v1/act")
-    def act(body: ActionBody, authorization: str = Header(default="")):
-        request = ActionRequest(**body.model_dump())
+    def act(request: ActionRequest, authorization: str = Header(default="")):
         if not authorization.startswith("Bearer "):
             # A forged token reached handle() and was audited as AUTH-001; a
             # MISSING token was rejected here and left no record at all, so the

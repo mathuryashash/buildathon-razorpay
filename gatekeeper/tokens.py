@@ -22,7 +22,6 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import secrets
 import time
 
@@ -94,15 +93,3 @@ def verify(token: str, *, secret: str, now: float | None = None) -> Capability:
         raise TokenError("capability token expired")
     return cap
 
-
-def proxy_secret() -> str:
-    """The signing secret. Distinct from the Razorpay key -- rotating one must
-    not require rotating the other."""
-    s = os.environ.get("GATEKEEPER_SIGNING_SECRET")
-    if not s:
-        raise TokenError(
-            "GATEKEEPER_SIGNING_SECRET is not set. Copy .env.example to .env "
-            "and fill it in. The proxy refuses to start without a signing secret "
-            "rather than falling back to a default one."
-        )
-    return s
