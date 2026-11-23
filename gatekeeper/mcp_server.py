@@ -90,14 +90,9 @@ def _load_dotenv() -> None:
         os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
-class Clock:
-    """Injectable time. Production uses the wall clock."""
-
-    def __init__(self, fixed: float | None = None):
-        self.fixed = fixed
-
-    def __call__(self) -> float:
-        return self.fixed if self.fixed is not None else time.time()
+def _make_clock(fixed: float | None) -> Callable[[], float]:
+    """Return a callable that returns a fixed timestamp or the wall clock."""
+    return (lambda: fixed) if fixed is not None else time.time
 
 
 def _rule_id(gk: Gatekeeper, res: ActionResult) -> tuple[str, list[str]]:
@@ -143,7 +138,7 @@ def build_server(gk: Gatekeeper, token: str | Callable[[], str],
                  *, name: str = "gatekeeper") -> MCPServer:
     """`token` may be a callable so the red-team runner can swap in forged /
     expired / tampered capabilities per call without rebuilding the server."""
-    clock = clock or Clock()
+    clock = clock or _make_clock(None)
     _tok: Callable[[], str] = token if callable(token) else (lambda: token)
     mcp = MCPServer(
         name=name,
@@ -261,14 +256,14 @@ def _forbid_unknown_arguments(mcp: MCPServer) -> None:
         tool.parameters = model.model_json_schema(by_alias=True)
 
 
-def from_env() -> tuple[Gatekeeper, str, Clock]:
+def from_env() -> tuple[Gatekeeper, str, Callable[[], float]]:
     _load_dotenv()
     secret = os.environ.get("GATEKEEPER_SIGNING_SECRET", "")
     if not secret:
         raise SystemExit("FATAL: GATEKEEPER_SIGNING_SECRET is not set; refusing to start.")
     backend = get_backend(os.environ.get("GATEKEEPER_MCP_BACKEND", "mock"))
     fixed = os.environ.get("GATEKEEPER_MCP_FIXED_NOW")
-    clock = Clock(float(fixed) if fixed else None)
+    clock = _make_clock(float(fixed) if fixed else None)
     gk = Gatekeeper(backend=backend, db_path=os.environ.get("GATEKEEPER_MCP_DB", "gatekeeper-mcp.db"),
                     signing_secret=secret)
     token = os.environ.get("GATEKEEPER_MCP_TOKEN", "")
